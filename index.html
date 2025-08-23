@@ -5,25 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Gestão DO-AGA</title>
 
-  <!-- seu CSS principal -->
-  <link rel="stylesheet" href="./css/styles.css" />
+  <!-- CSS principal existente do projeto -->
+  <link rel="stylesheet" href="css/styles.css" />
 
-  <!-- override para largura total dos módulos -->
-  <link rel="stylesheet" href="./css/fullwidth-overrides.css" />
+  <!-- Override: todos os módulos usam 100% da largura disponível -->
+  <link rel="stylesheet" href="css/fullwidth-overrides.css" />
 </head>
 <body>
-  <header class="app-header">
-    <h1>Gestão DO-AGA</h1>
-    <nav id="nav"></nav>
-    <div id="auth-area"></div>
-  </header>
+  <header><!-- seu cabeçalho permanece aqui --></header>
 
+  <!-- Onde os módulos são renderizados -->
   <main id="app"></main>
 
-  <!-- Configurações do Supabase (URL e anon key) -->
-  <script src="./env.js"></script>
-
-  <!-- App (ES Modules) -->
-  <script type="module" src="./app.js"></script>
+  <!-- Seus scripts existentes -->
+  <script type="module" src="main.js"></script>
 </body>
 </html>
