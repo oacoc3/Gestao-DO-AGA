@@ -205,19 +205,21 @@ function showHistoryModal(titulo, hist) {
   }).join("");
 
   modal.querySelector("#hist-body").innerHTML = `
-    <table class="table">
-      <thead>
-        <tr>
-          <th style="text-align:center">Data/Hora</th>
-          <th style="text-align:center">De</th>
-          <th style="text-align:center">Para</th>
-          <th style="text-align:center">Por</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows || `<tr><td style="text-align:center" colspan="4">Sem histórico.</td></tr>`}
-      </tbody>
-    </table>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th style="text-align:center">Data/Hora</th>
+            <th style="text-align:center">De</th>
+            <th style="text-align:center">Para</th>
+            <th style="text-align:center">Por</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows || `<tr><td style="text-align:center" colspan="4">Sem histórico.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
   `;
   modal.style.display = "flex";
 }
@@ -237,6 +239,40 @@ function parseYmd(s) {
   return d.getTime();
 }
 
+// ========= (NOVO) CSS responsivo injetado =========
+
+function ensureResponsiveCSS() {
+  if (document.getElementById("spa-responsive-css")) return;
+  const style = document.createElement("style");
+  style.id = "spa-responsive-css";
+  style.textContent = `
+    /* Mantém o formulário numa linha em telas largas */
+    .form-row { display:flex; align-items:flex-end; gap:8px; flex-wrap:nowrap; overflow:auto; }
+    .form-row > div { display:flex; flex-direction:column; }
+    /* Envelopes para rolagem horizontal da tabela quando necessário */
+    .table-wrap { width:100%; overflow-x:auto; }
+    .table-wrap .table { min-width: 980px; } /* evita "amassar" colunas */
+
+    /* Quebra em múltiplas linhas quando a tela reduzir */
+    @media (max-width: 1200px) {
+      .form-row { flex-wrap: wrap !important; }
+      .form-row > div { min-width: 160px; }
+    }
+    @media (max-width: 900px) {
+      .form-row { gap: 6px; }
+      .form-row > div { flex: 1 1 45%; min-width: 140px; }
+      .form-row button { width: 100%; }
+    }
+    @media (max-width: 560px) {
+      .form-row { flex-direction: column; align-items: stretch; }
+      .form-row > div { width: 100%; }
+      .form-row button { width: 100%; }
+      .table-wrap .table { min-width: 700px; } /* para modais/lista em telas bem pequenas */
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 // ========= Tabela (com filtros + ordenação + células centralizadas) =========
 
 function viewTabela(listView, sort, filters) {
@@ -244,98 +280,97 @@ function viewTabela(listView, sort, filters) {
     `<th data-sort-key="${key}" style="text-align:center; cursor:pointer">${label}${arrowFor(key, sort)}</th>`;
 
   return `
-    <table class="table">
-      <thead>
-        <tr>
-          ${th("nup","NUP")}
-          ${th("tipo","Tipo")}
-          ${th("status","Status")}
-          ${th("entrada","1ª Entrada Regional")}
-          ${th("prazo","Prazo Regional")}
-          ${th("modificado","Modificado por")}
-          ${th("atualizado","Atualizado em")}
-          <th style="text-align:center">Ações</th>
-        </tr>
-        <tr>
-          <th style="text-align:center">
-            <input id="flt-nup" placeholder="Filtrar..." value="${filters.nup ?? ""}" style="text-align:center; width:95%">
-          </th>
-          <th style="text-align:center">
-            <select id="flt-tipo" style="text-align:center; width:95%">
-              <option value="">Todos</option>
-              ${TIPOS.map(t => `<option ${filters.tipo===t?"selected":""}>${t}</option>`).join("")}
-            </select>
-          </th>
-          <th style="text-align:center">
-            <select id="flt-status" style="text-align:center; width:95%">
-              <option value="">Todos</option>
-              ${STATUS.map(s => `<option ${filters.status===s?"selected":""}>${s}</option>`).join("")}
-            </select>
-          </th>
-          <th style="text-align:center">
-            <div style="display:flex; gap:4px; justify-content:center">
-              <input id="flt-ent-from" type="date" value="${filters.entFrom ?? ""}" style="text-align:center">
-              <input id="flt-ent-to" type="date" value="${filters.entTo ?? ""}" style="text-align:center">
-            </div>
-          </th>
-          <th style="text-align:center">
-            <div style="display:flex; gap:6px; justify-content:center; align-items:center">
-              <label class="small"><input id="flt-prazo-sob" type="checkbox" ${filters.prazoSob?"checked":""}> Somente Sobrestado</label>
-            </div>
-          </th>
-          <th style="text-align:center">
-            <input id="flt-mod" placeholder="Filtrar..." value="${filters.mod ?? ""}" style="text-align:center; width:95%">
-          </th>
-          <th style="text-align:center">
-            <div style="display:flex; gap:4px; justify-content:center">
-              <input id="flt-atl-from" type="date" value="${filters.atlFrom ?? ""}" style="text-align:center">
-              <input id="flt-atl-to" type="date" value="${filters.atlTo ?? ""}" style="text-align:center">
-            </div>
-          </th>
-          <th style="text-align:center">
-            <button id="flt-clear">Limpar filtros</button>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        ${listView.map(v => `
-          <tr data-id="${v.id}" data-nup="${v.nup}">
-            <td style="text-align:center">${v.nup}</td>
-            <td style="text-align:center">${v.tipo}</td>
-            <td style="text-align:center">
-              <div style="display:flex; justify-content:center">
-                <select class="status-select">
-                  ${STATUS.map(s => `<option ${s === v.status ? "selected" : ""}>${s}</option>`).join("")}
-                </select>
-              </div>
-            </td>
-            <td style="text-align:center">${v.entrada || ""}</td>
-            <td style="text-align:center">${v.prazoDisplay}</td>
-            <td class="small" style="text-align:center">${v.modificado || ""}</td>
-            <td class="small" style="text-align:center">${v.atualizadoStr}</td>
-            <td style="text-align:center">
-              <div style="display:flex; justify-content:center">
-                <button class="btn-historico">Histórico</button>
-              </div>
-            </td>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            ${th("nup","NUP")}
+            ${th("tipo","Tipo")}
+            ${th("status","Status")}
+            ${th("entrada","1ª Entrada Regional")}
+            ${th("prazo","Prazo Regional")}
+            ${th("modificado","Modificado por")}
+            ${th("atualizado","Atualizado em")}
+            <th style="text-align:center">Ações</th>
           </tr>
-        `).join("")}
-      </tbody>
-    </table>
+          <tr>
+            <th style="text-align:center">
+              <input id="flt-nup" placeholder="Filtrar..." value="${filters.nup ?? ""}" style="text-align:center; width:95%">
+            </th>
+            <th style="text-align:center">
+              <select id="flt-tipo" style="text-align:center; width:95%">
+                <option value="">Todos</option>
+                ${TIPOS.map(t => `<option ${filters.tipo===t?"selected":""}>${t}</option>`).join("")}
+              </select>
+            </th>
+            <th style="text-align:center">
+              <select id="flt-status" style="text-align:center; width:95%">
+                <option value="">Todos</option>
+                ${STATUS.map(s => `<option ${filters.status===s?"selected":""}>${s}</option>`).join("")}
+              </select>
+            </th>
+            <th style="text-align:center">
+              <div style="display:flex; gap:4px; justify-content:center">
+                <input id="flt-ent-from" type="date" value="${filters.entFrom ?? ""}" style="text-align:center">
+                <input id="flt-ent-to" type="date" value="${filters.entTo ?? ""}" style="text-align:center">
+              </div>
+            </th>
+            <th style="text-align:center">
+              <div style="display:flex; gap:6px; justify-content:center; align-items:center">
+                <label class="small"><input id="flt-prazo-sob" type="checkbox" ${filters.prazoSob?"checked":""}> Somente Sobrestado</label>
+              </div>
+            </th>
+            <th style="text-align:center">
+              <input id="flt-mod" placeholder="Filtrar..." value="${filters.mod ?? ""}" style="text-align:center; width:95%">
+            </th>
+            <th style="text-align:center">
+              <div style="display:flex; gap:4px; justify-content:center">
+                <input id="flt-atl-from" type="date" value="${filters.atlFrom ?? ""}" style="text-align:center">
+                <input id="flt-atl-to" type="date" value="${filters.atlTo ?? ""}" style="text-align:center">
+              </div>
+            </th>
+            <th style="text-align:center">
+              <button id="flt-clear">Limpar filtros</button>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          ${listView.map(v => `
+            <tr data-id="${v.id}" data-nup="${v.nup}">
+              <td style="text-align:center">${v.nup}</td>
+              <td style="text-align:center">${v.tipo}</td>
+              <td style="text-align:center">
+                <div style="display:flex; justify-content:center">
+                  <select class="status-select">
+                    ${STATUS.map(s => `<option ${s === v.status ? "selected" : ""}>${s}</option>`).join("")}
+                  </select>
+                </div>
+              </td>
+              <td style="text-align:center">${v.entrada || ""}</td>
+              <td style="text-align:center">${v.prazoDisplay}</td>
+              <td class="small" style="text-align:center">${v.modificado || ""}</td>
+              <td class="small" style="text-align:center">${v.atualizadoStr}</td>
+              <td style="text-align:center">
+                <div style="display:flex; justify-content:center">
+                  <button class="btn-historico">Histórico</button>
+                </div>
+              </td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
   `;
 }
 
-// ========= Formulário (UMA LINHA após o título, na ordem solicitada) =========
+// ========= Formulário (uma linha após o título; responsivo por CSS) =========
 
 function viewFormulario() {
   return `
     <div class="card">
       <h3>Insira o NUP do Processo</h3>
 
-      <div id="form-row" style="
-        display:flex; align-items:flex-end; gap:8px; flex-wrap:nowrap;
-        overflow:auto; padding-bottom:4px
-      ">
+      <div id="form-row" class="form-row">
         <!-- NUP -->
         <div style="min-width:260px">
           <label>NUP</label>
@@ -431,6 +466,9 @@ export default {
   title: "Processos",
   route: "#/processos",
   async view(container) {
+    // injeta CSS responsivo (uma vez)
+    ensureResponsiveCSS();
+
     container.innerHTML = `
       <div class="container">
         ${viewFormulario()}
