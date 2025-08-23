@@ -153,12 +153,11 @@ function ensureLayoutCSS() {
     .hist-pane { flex:0 0 35%; }
     .grid-pane { flex:1 1 65%; }
     .pane-title { margin:0 0 8px 0; }
-    .pane-body { flex:1 1 auto; min-height:0; overflow:hidden; }
+    .pane-body { flex:1 1 auto; min-height:0; overflow:hidden; display:flex; } /* << importante p/ rolagem interna */
 
     /* =======================
        LISTA DE PROCESSOS (GRID)
        ======================= */
-    /* Larguras com clamp/minmax: cabem sem rolagem horizontal */
     :root{
       --w-nup: clamp(20ch, 22ch, 26ch);
       --w-tipo: clamp(8ch, 10ch, 14ch);
@@ -166,7 +165,11 @@ function ensureLayoutCSS() {
       --w-prazo: clamp(8ch, 10ch, 12ch);
     }
 
-    .grid-scroll { height:100%; overflow-y:auto; overflow-x:hidden; position:relative; }
+    /* #grid ocupa todo o espaço disponível da pane-body */
+    #grid{ flex:1 1 auto; min-height:0; display:flex; }
+
+    /* roletador vertical interno (sem height:100%; usa flex) */
+    .grid-scroll { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; position:relative; }
 
     .proc-grid-header,
     .proc-grid-row{
