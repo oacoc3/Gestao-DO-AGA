@@ -88,7 +88,7 @@ async function getHistoricoBatch(ids) {
   if (!ids.length) return [];
   const { data, error } = await supabase
     .from("status_history")
-    .select("processo_id, old_status, new_status, changed_at")
+    .select("processo_id, old_status, new_status, changed_at, changed_by_email, changed_by")
     .in("processo_id", ids);
   if (error) throw error;
   return data;
@@ -101,6 +101,7 @@ const SOBRESTADOS = new Set(["Sobrestado Técnico", "Sobrestado Documental"]);
 const DIA_MS = 24 * 60 * 60 * 1000;
 
 function calcularPrazosMapa(processos, historicos) {
+  // pega a última saída de sobrestado de cada processo
   const saidaSobMap = new Map();
   for (const h of historicos) {
     const saiuDeSob = SOBRESTADOS.has(h.old_status) && !SOBRESTADOS.has(h.new_status);
@@ -127,12 +128,12 @@ function calcularPrazosMapa(processos, historicos) {
 }
 
 /* =========================
-   CSS do módulo (layout)
+   CSS do módulo (layout via CSS GRID)
    ========================= */
 function ensureLayoutCSS() {
-  if (document.getElementById("proc-two-pane-css")) return;
+  if (document.getElementById("proc-grid-css")) return;
   const style = document.createElement("style");
-  style.id = "proc-two-pane-css";
+  style.id = "proc-grid-css";
   style.textContent = `
     /* sem rolagem de página */
     html, body { overflow: hidden; }
@@ -152,47 +153,108 @@ function ensureLayoutCSS() {
     .hist-pane { flex:0 0 35%; }
     .grid-pane { flex:1 1 65%; }
     .pane-title { margin:0 0 8px 0; }
-    .pane-body { flex:1 1 auto; min-height:0; overflow:hidden; } /* scroller é o filho interno */
+    .pane-body { flex:1 1 auto; min-height:0; overflow:hidden; }
 
-    /* histórico (esquerda) – scroller interno */
-    .hist-scroll { height:100%; overflow-y:auto; overflow-x:hidden; }
-    .hist-pane .table { width:100%; table-layout:fixed; border-collapse:collapse; }
-    .hist-pane th, .hist-pane td {
-      font-size:12px; padding:4px 6px; text-align:center;
-      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    /* =======================
+       LISTA DE PROCESSOS (GRID)
+       ======================= */
+    /* Larguras com clamp/minmax: cabem sem rolagem horizontal */
+    :root{
+      --w-nup: clamp(20ch, 22ch, 26ch);
+      --w-tipo: clamp(8ch, 10ch, 14ch);
+      --w-entrada: clamp(10ch, 12ch, 16ch);
+      --w-prazo: clamp(8ch, 10ch, 12ch);
     }
-    .hist-scroll thead th { position:sticky; top:0; background:#fff; z-index:2; border-bottom:1px solid #ddd; }
 
-    /* processos (direita) – scroller interno com cabeçalho fixo e SEM rolagem lateral */
     .grid-scroll { height:100%; overflow-y:auto; overflow-x:hidden; position:relative; }
-    .grid-pane .table { width:100%; table-layout:fixed; border-collapse:collapse; }
-    .grid-pane td, .grid-pane th {
-      font-size:12px; padding:4px 6px; text-align:center;
-      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-    }
-    .grid-scroll thead th { position:sticky; top:0; background:#fff; z-index:3; }
 
-    /* botões de ordenação em PILHA (abaixo do título) */
-    .th-stack { display:flex; flex-direction:column; align-items:center; gap:2px; }
-    .th-label { display:block; }
+    .proc-grid-header,
+    .proc-grid-row{
+      display: grid;
+      grid-template-columns:
+        var(--w-nup)           /* NUP */
+        var(--w-tipo)          /* Tipo */
+        minmax(0, 1.4fr)       /* Status (flex) */
+        var(--w-entrada)       /* 1ª Entrada Regional */
+        var(--w-prazo)         /* Prazo Regional */
+        minmax(0, 1fr)         /* Atualizado por (flex) */
+        minmax(0, 1fr);        /* Atualizado em (flex) */
+      gap: 0;
+      align-items: center;
+    }
+
+    .proc-grid-header{
+      position: sticky; top: 0; z-index: 3;
+      background:#fff; border-bottom:1px solid #ddd;
+    }
+
+    .proc-grid-header > div,
+    .proc-grid-row > div{
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: center;
+      padding: 4px 6px;
+      font-size: 12px;
+    }
+
+    /* Título + botões de ordenação empilhados */
+    .hdc { display:flex; flex-direction:column; align-items:center; gap:2px; }
+    .hdc .title { line-height:1.05; }
     .sort-wrap { display:inline-flex; gap:2px; }
     .sort-btn { border:1px solid #ccc; background:#f7f7f7; padding:0 4px; line-height:16px; height:18px; cursor:pointer; }
     .sort-btn.active { background:#e9e9e9; font-weight:bold; }
 
-    /* linha selecionada */
-    .row-selected { outline:2px solid #999; }
+    /* Linha selecionada */
+    .proc-grid-row.row-selected { outline:2px solid #999; outline-offset:-1px; }
+
+    /* =======================
+       HISTÓRICO (GRID)
+       ======================= */
+    :root{
+      --w-hist-data: clamp(12ch, 16ch, 18ch);
+      --w-hist-autor: clamp(16ch, 20ch, 24ch);
+    }
+    .hist-scroll { height:100%; overflow-y:auto; overflow-x:hidden; }
+
+    .hist-header,
+    .hist-row{
+      display:grid;
+      grid-template-columns:
+        var(--w-hist-data)     /* Data/Hora */
+        minmax(0, 1fr)         /* De */
+        minmax(0, 1fr)         /* Para */
+        var(--w-hist-autor);   /* Por */
+      gap:0;
+      align-items:center;
+    }
+
+    .hist-header{
+      position: sticky; top: 0; z-index:2;
+      background:#fff; border-bottom:1px solid #ddd;
+    }
+
+    .hist-header > div,
+    .hist-row > div{
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-align: center;
+      padding: 4px 6px;
+      font-size: 12px;
+    }
   `;
   document.head.appendChild(style);
 }
 
-/* ajusta altura útil para rolagem interna nas listas */
+/* ajusta alturas de área útil para rolagem vertical interna */
 function applyHeights(root) {
   const mod = root.querySelector(".proc-mod");
   const split = root.querySelector(".proc-split");
   if (!mod || !split) return;
 
   const top = mod.getBoundingClientRect().top;
-  const available = window.innerHeight - top - 12; /* pequeno respiro */
+  const available = window.innerHeight - top - 12; /* respiro */
   mod.style.height = available + "px";
 
   const formH = root.querySelector(".proc-form-card").getBoundingClientRect().height;
@@ -200,101 +262,85 @@ function applyHeights(root) {
 }
 
 /* =========================
-   Ordenação
+   Ordenação (header cell)
    ========================= */
-function thSort(key, labelHtml, sort) {
+function headerCell(key, labelHtml, sort) {
   return `
-    <th data-sort-key="${key}">
-      <div class="th-stack">
-        <span class="th-label" data-k="${key}" style="cursor:pointer">${labelHtml}</span>
-        <span class="sort-wrap">
-          <button class="sort-btn ${sort.key===key && sort.dir==='asc' ? 'active':''}" data-k="${key}" data-d="asc">▲</button>
-          <button class="sort-btn ${sort.key===key && sort.dir==='desc' ? 'active':''}" data-k="${key}" data-d="desc">▼</button>
-        </span>
-      </div>
-    </th>
-  `;
-}
-
-/* =========================
-   Tabela (status só exibe)
-   ========================= */
-function viewTabela(listView, sort) {
-  // Larguras 100% (sem rolagem lateral) e cabeçalho com duas linhas em "1ª Entrada Regional" e "Prazo Regional"
-  return `
-    <div class="grid-scroll">
-      <table class="table">
-        <colgroup>
-          <col style="width:24%">  <!-- NUP: suficiente p/ exibir inteiro em telas comuns -->
-          <col style="width:10%">
-          <col style="width:15%">
-          <col style="width:11%">  <!-- 1ª Entrada (título em 2 linhas) -->
-          <col style="width:9%">   <!-- Prazo (título em 2 linhas) -->
-          <col style="width:15%">
-          <col style="width:16%">
-        </colgroup>
-        <thead>
-          <tr>
-            ${thSort("nup","NUP",sort)}
-            ${thSort("tipo","Tipo",sort)}
-            ${thSort("status","Status",sort)}
-            ${thSort("entrada","1ª Entrada<br>Regional",sort)}
-            ${thSort("prazo","Prazo<br>Regional",sort)}
-            ${thSort("atualizadoPor","Atualizado por",sort)}
-            ${thSort("atualizado","Atualizado em",sort)}
-          </tr>
-        </thead>
-        <tbody>
-          ${listView.map(v => `
-            <tr data-id="${v.id}" data-nup="${v.nup}">
-              <td>${v.nup}</td>
-              <td>${v.tipo}</td>
-              <td>${v.status}</td>
-              <td>${v.entrada || ""}</td>
-              <td>${v.prazoDisplay}</td>
-              <td class="small">${v.atualizadoPor || ""}</td>
-              <td class="small">${v.atualizadoStr}</td>
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
+    <div class="hdc" data-sort-key="${key}">
+      <span class="title" data-k="${key}" style="cursor:pointer">${labelHtml}</span>
+      <span class="sort-wrap">
+        <button class="sort-btn ${sort.key===key && sort.dir==='asc' ? 'active':''}" data-k="${key}" data-d="asc">▲</button>
+        <button class="sort-btn ${sort.key===key && sort.dir==='desc' ? 'active':''}" data-k="${key}" data-d="desc">▼</button>
+      </span>
     </div>
   `;
 }
 
 /* =========================
-   Histórico (painel esquerdo)
+   VIEW: Tabela de Processos (GRID)
+   ========================= */
+function viewTabela(listView, sort) {
+  const header = `
+    <div class="proc-grid-header">
+      ${headerCell("nup","NUP",sort)}
+      ${headerCell("tipo","Tipo",sort)}
+      ${headerCell("status","Status",sort)}
+      ${headerCell("entrada","1ª Entrada<br>Regional",sort)}
+      ${headerCell("prazo","Prazo<br>Regional",sort)}
+      ${headerCell("atualizadoPor","Atualizado por",sort)}
+      ${headerCell("atualizado","Atualizado em",sort)}
+    </div>
+  `;
+  const body = listView.map(v => `
+    <div class="proc-grid-row" data-id="${v.id}" data-nup="${v.nup}">
+      <div>${v.nup}</div>
+      <div>${v.tipo}</div>
+      <div>${v.status}</div>
+      <div>${v.entrada || ""}</div>
+      <div>${v.prazoDisplay}</div>
+      <div class="small">${v.atualizadoPor || ""}</div>
+      <div class="small">${v.atualizadoStr}</div>
+    </div>
+  `).join("");
+
+  return `
+    <div class="grid-scroll">
+      ${header}
+      ${body}
+    </div>
+  `;
+}
+
+/* =========================
+   VIEW: Histórico (GRID)
    ========================= */
 function viewHistorico(title, hist) {
+  const header = `
+    <div class="hist-header">
+      <div>Data/Hora</div><div>De</div><div>Para</div><div>Por</div>
+    </div>
+  `;
   const rows = (hist || []).map(h => {
     const autor = h.changed_by_email || h.changed_by || "(desconhecido)";
     const quando = new Date(h.changed_at).toLocaleString();
     const de = h.old_status ?? "(criação)";
     const para = h.new_status ?? "(sem status)";
-    return `<tr><td>${quando}</td><td>${de}</td><td>${para}</td><td>${autor}</td></tr>`;
+    return `<div class="hist-row"><div>${quando}</div><div>${de}</div><div>${para}</div><div>${autor}</div></div>`;
   }).join("");
+
   return `
     <h3 class="pane-title">${title}</h3>
     <div class="pane-body">
       <div class="hist-scroll">
-        <table class="table">
-          <colgroup>
-            <col style="width:22%"><col style="width:26%"><col style="width:26%"><col style="width:26%">
-          </colgroup>
-          <thead>
-            <tr><th>Data/Hora</th><th>De</th><th>Para</th><th>Por</th></tr>
-          </thead>
-          <tbody>
-            ${rows || `<tr><td colspan="4">Sem histórico.</td></tr>`}
-          </tbody>
-        </table>
+        ${header}
+        ${rows || `<div class="hist-row"><div colspan="4">Sem histórico.</div></div>`}
       </div>
     </div>
   `;
 }
 
 /* =========================
-   Formulário
+   Formulário (inalterado visualmente)
    ========================= */
 function viewFormulario() {
   return `
@@ -333,18 +379,18 @@ function viewFormulario() {
 }
 
 /* =========================
-   Bind da tabela
+   Bind dos eventos da lista
    ========================= */
 function bindTabela(container, refresh, onPickRow) {
-  container.querySelectorAll("tr[data-id]").forEach(tr => {
-    const id = tr.getAttribute("data-id");
-    const nup = tr.getAttribute("data-nup");
-
-    tr.addEventListener("click", async () => {
+  // clique nas linhas
+  container.querySelectorAll(".proc-grid-row").forEach(row => {
+    const id = row.getAttribute("data-id");
+    const nup = row.getAttribute("data-nup");
+    row.addEventListener("click", async () => {
       onPickRow(id);
       try {
-        container.querySelectorAll("tbody tr").forEach(r => r.classList.remove("row-selected"));
-        tr.classList.add("row-selected");
+        container.querySelectorAll(".proc-grid-row").forEach(r => r.classList.remove("row-selected"));
+        row.classList.add("row-selected");
         const hist = await getHistorico(id);
         const pane = document.getElementById("hist-pane");
         pane.innerHTML = viewHistorico(`Histórico — ${nup}`, hist);
@@ -354,20 +400,19 @@ function bindTabela(container, refresh, onPickRow) {
     });
   });
 
-  // eventos dos botões de ordenação
+  // ordenação
   container.querySelectorAll(".sort-btn").forEach(btn => {
     btn.addEventListener("click", (ev) => {
       const k = btn.getAttribute("data-k");
       const d = btn.getAttribute("data-d");
-      container.dispatchEvent(new CustomEvent("sortchange", { detail: {key:k, dir:d} }));
+      container.dispatchEvent(new CustomEvent("sortchange", { detail: { key:k, dir:d } }));
       ev.stopPropagation();
     });
   });
-  container.querySelectorAll("th[data-sort-key] .th-label").forEach(lbl => {
+  container.querySelectorAll(".hdc .title").forEach(lbl => {
     lbl.addEventListener("click", () => {
-      const th = lbl.closest("th");
-      const k = th.getAttribute("data-sort-key");
-      container.dispatchEvent(new CustomEvent("sorttoggle", { detail: {key:k} }));
+      const k = lbl.getAttribute("data-k");
+      container.dispatchEvent(new CustomEvent("sorttoggle", { detail: { key:k } }));
     });
   });
 }
@@ -392,7 +437,7 @@ export default {
           <div class="card proc-pane grid-pane" id="grid-pane">
             <h3 class="pane-title">Lista de processos</h3>
             <div class="pane-body">
-              <div id="grid" class="grid-scroll">Carregando...</div>
+              <div id="grid">Carregando...</div>
             </div>
           </div>
         </div>
@@ -529,8 +574,8 @@ export default {
       });
 
       if (currentRowId) {
-        const tr = gridWrap.querySelector(`tr[data-id="${currentRowId}"]`);
-        if (tr) tr.classList.add("row-selected");
+        const rows = gridWrap.querySelectorAll(".proc-grid-row");
+        rows.forEach(r => { if (r.getAttribute("data-id") === String(currentRowId)) r.classList.add("row-selected"); });
       }
     }
     function onPickRowFromList(id) {
@@ -610,7 +655,6 @@ export default {
         prazosMap = calcularPrazosMapa(allList, historicos);
         buildViewData();
         renderGrid();
-        // recalcula alturas após render
         setTimeout(resizeAll, 0);
       } catch (e) {
         gridWrap.innerHTML = `<p>Erro ao carregar: ${e.message}</p>`;
