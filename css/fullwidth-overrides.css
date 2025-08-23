@@ -1,32 +1,57 @@
 /* fullwidth-overrides.css
-   Faz TODOS os módulos ocuparem 100% da largura, com responsividade.
-   Não altera cores ou componentes — só layout. */
+   1) Todos os módulos usam 100% da largura.
+   2) Cabeçalho mais baixo (-60% aprox.).
+   3) Formulário mais baixo.
+   4) Mantém responsividade. */
 
-/* remove limite de largura apenas na área dos módulos */
+/* ——————————————————————————————————————————————— */
+/* Largura total na área dos módulos (#app) */
 #app,
 #app .container {
   width: 100%;
-  max-width: none;      /* derruba o max-width dos temas */
+  max-width: none;
 }
 
-/* respiro lateral para não colar nas bordas */
+/* respiro lateral */
 #app .container {
   padding-left: 16px;
   padding-right: 16px;
 }
 
-/* componentes internos ocupam a faixa disponível */
+/* cartões e tabelas ocupam a faixa disponível */
 #app .card { width: 100%; }
 #app .table { width: 100%; table-layout: fixed; }
 
-/* evita que inputs/selects “estourem” células da tabela */
+/* evita que inputs/selects “estourem” células */
 #app table input,
 #app table select,
-#app table button {
-  max-width: 100%;
+#app table button { max-width: 100%; }
+
+/* ——————————————————————————————————————————————— */
+/* 1) Reduzir a altura do cabeçalho em ~60% */
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 8px;      /* era bem maior — reduz para ~40% do anterior */
+  padding-bottom: 8px;
+}
+.app-header .brand {
+  margin: 0;
+  line-height: 1.1;
+  font-size: 1.6rem;     /* menor para o header ficar mais baixo */
 }
 
-/* telas menores: reduz o padding lateral */
+/* ——————————————————————————————————————————————— */
+/* 2) Formulário mais baixo (altura total reduzida) */
+.proc-form-card { padding-top: 8px !important; padding-bottom: 8px !important; }
+.proc-form-row label { margin-bottom: 2px !important; font-size: 0.95rem !important; }
+.proc-form-row input,
+.proc-form-row select,
+.proc-form-row button { height: 34px !important; }
+
+/* ——————————————————————————————————————————————— */
+/* Responsivo: reduz levemente o padding lateral em telas pequenas */
 @media (max-width: 640px) {
   #app .container { padding-left: 10px; padding-right: 10px; }
 }
