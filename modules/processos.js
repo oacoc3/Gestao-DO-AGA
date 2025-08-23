@@ -2,7 +2,6 @@
 // Siglas usadas:
 // - CRUD: Create, Read, Update, Delete (Criar, Ler, Atualizar, Excluir)
 // - RLS: Row Level Security (Segurança em nível de linha)
-// - UUID: Universally Unique Identifier (Identificador único universal)
 
 import { supabase } from "../supabaseClient.js";
 
@@ -121,80 +120,101 @@ function calcularPrazosMapa(processos, historicos) {
   return prazos;
 }
 
-// ========= CSS do módulo (layout, sticky headers, larguras 30%/70%) =========
+// ========= CSS do módulo (layout, sticky headers, larguras 40/60, botões de ordenação) =========
 
 function ensureLayoutCSS() {
   if (document.getElementById("proc-two-pane-css")) return;
   const style = document.createElement("style");
   style.id = "proc-two-pane-css";
   style.textContent = `
-    /* Módulo ocupa a área útil visível; sem rolagem global */
+    /* Sem rolagem global */
+    html, body { overflow: hidden; }
+
+    /* Módulo ocupa a área útil visível */
     .proc-mod { display:flex; flex-direction:column; overflow:hidden; }
 
-    /* Formulário 100% largura e mais compacto (altura menor) */
+    /* Formulário compacto */
     .proc-form-card { flex:0 0 auto; padding-top:8px; padding-bottom:8px; }
     .proc-form-row { display:flex; align-items:flex-end; gap:8px; flex-wrap:nowrap; overflow:auto; }
     .proc-form-row > div { display:flex; flex-direction:column; }
     .proc-form-row label { font-size:0.95rem; margin-bottom:2px; }
     .proc-form-row input, .proc-form-row select, .proc-form-row button { height:34px; }
 
-    /* Área dividida em duas metades com proporções 30% (histórico) / 70% (lista) */
+    /* Área dividida: 40% histórico, 60% processos */
     .proc-split { display:flex; gap:10px; overflow:hidden; }
     .proc-pane { min-width:0; display:flex; flex-direction:column; overflow:hidden; }
-    .hist-pane { flex:0 0 30%; }
-    .grid-pane { flex:1 1 70%; }
+    .hist-pane { flex:0 0 40%; }
+    .grid-pane { flex:1 1 60%; }
     .pane-title { margin:0 0 8px 0; }
     .pane-body { flex:1 1 auto; min-height:0; overflow:auto; }
 
-    /* Lista (direita) – rolagem vertical interna, cabeçalho fixo, sem filtros */
+    /* Lista (direita) – rolagem vertical interna, cabeçalho fixo */
     .grid-pane .table { width:100%; table-layout:fixed; border-collapse:collapse; }
     .grid-pane th, .grid-pane td { font-size:12px; padding:4px 6px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .grid-pane select { font-size:12px; }
     .grid-scroll { height:100%; overflow:auto; position:relative; }
     .grid-scroll thead th { position:sticky; top:0; background:#fff; z-index:3; }
 
-    /* Histórico (esquerda) – cabeçalho fixo e rolagem vertical interna */
+    /* Botões de ordenação sempre visíveis */
+    .sort-wrap { display:inline-flex; gap:2px; margin-left:4px; vertical-align:middle; }
+    .sort-btn { border:1px solid #ccc; background:#f7f7f7; padding:0 4px; line-height:16px; height:18px; cursor:pointer; }
+    .sort-btn.active { background:#e9e9e9; font-weight:bold; }
+
+    /* Histórico (esquerda) – cabeçalho fixo e rolagem vertical */
     .hist-pane .table { width:100%; table-layout:fixed; border-collapse:collapse; }
     .hist-pane th, .hist-pane td { font-size:12px; padding:4px 6px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .hist-scroll thead th { position:sticky; top:0; background:#fff; z-index:2; border-bottom:1px solid #ddd; }
 
-    /* Linha selecionada na lista */
+    /* Linha selecionada */
     .row-selected { outline:2px solid #999; }
   `;
   document.head.appendChild(style);
 }
 
+// Calcula a altura útil e aplica (para não haver rolagem da página)
+function applyHeights(root) {
+  const mod = root.querySelector(".proc-mod");
+  const split = root.querySelector(".proc-split");
+  if (!mod || !split) return;
+
+  const top = mod.getBoundingClientRect().top;
+  const available = window.innerHeight - top - 12; // pequeno respiro inferior
+  mod.style.height = available + "px";
+
+  const formH = root.querySelector(".proc-form-card").getBoundingClientRect().height;
+  split.style.height = (available - formH - 10) + "px";
+}
+
 // ========= Helpers de ordenação =========
 
 function arrowFor(col, sort) {
-  if (sort.key !== col) return "";
-  return sort.dir === "asc" ? " ▲" : " ▼";
+  return sort.key === col ? (sort.dir === "asc" ? "▲" : "▼") : " ";
 }
 
-// ========= Tabela (sem linha de filtros e sem coluna de “Histórico”) =========
+// ========= Tabela (sem filtros; Status apenas exibe; + coluna “Atualizado por”) =========
 
-function viewTabela(listView, sort, STATUS) {
-  const th = (key, label) => `<th data-sort-key="${key}" style="cursor:pointer">${label}${arrowFor(key, sort)}</th>`;
-
+function viewTabela(listView, sort) {
+  // colgroup soma 100%
   return `
     <div class="grid-scroll">
       <table class="table">
         <colgroup>
+          <col style="width:16%">
+          <col style="width:12%">
           <col style="width:18%">
           <col style="width:12%">
-          <col style="width:20%">
-          <col style="width:14%">
-          <col style="width:14%">
-          <col style="width:22%">
+          <col style="width:12%">
+          <col style="width:15%">
+          <col style="width:15%">
         </colgroup>
         <thead>
           <tr>
-            ${th("nup","NUP")}
-            ${th("tipo","Tipo")}
-            ${th("status","Status")}
-            ${th("entrada","1ª Entrada Regional")}
-            ${th("prazo","Prazo Regional")}
-            ${th("atualizado","Atualizado em")}
+            ${thSort("nup","NUP",sort)}
+            ${thSort("tipo","Tipo",sort)}
+            ${thSort("status","Status",sort)}
+            ${thSort("entrada","1ª Entrada Regional",sort)}
+            ${thSort("prazo","Prazo Regional",sort)}
+            ${thSort("atualizadoPor","Atualizado por",sort)}
+            ${thSort("atualizado","Atualizado em",sort)}
           </tr>
         </thead>
         <tbody>
@@ -202,19 +222,28 @@ function viewTabela(listView, sort, STATUS) {
             <tr data-id="${v.id}" data-nup="${v.nup}">
               <td>${v.nup}</td>
               <td>${v.tipo}</td>
-              <td>
-                <select class="status-select">
-                  ${STATUS.map(s => `<option ${s===v.status?"selected":""}>${s}</option>`).join("")}
-                </select>
-              </td>
+              <td>${v.status}</td>
               <td>${v.entrada || ""}</td>
               <td>${v.prazoDisplay}</td>
+              <td class="small">${v.atualizadoPor || ""}</td>
               <td class="small">${v.atualizadoStr}</td>
             </tr>
           `).join("")}
         </tbody>
       </table>
     </div>
+  `;
+}
+
+function thSort(key, label, sort) {
+  return `
+    <th data-sort-key="${key}">
+      <span class="th-label" style="cursor:pointer">${label}</span>
+      <span class="sort-wrap">
+        <button class="sort-btn ${sort.key===key && sort.dir==='asc' ? 'active':''}" data-k="${key}" data-d="asc">▲</button>
+        <button class="sort-btn ${sort.key===key && sort.dir==='desc' ? 'active':''}" data-k="${key}" data-d="desc">▼</button>
+      </span>
+    </th>
   `;
 }
 
@@ -246,7 +275,7 @@ function viewHistorico(title, hist) {
   `;
 }
 
-// ========= Formulário (uma linha; sem título acima; rótulo alterado; sem botão Histórico) =========
+// ========= Formulário (sem título acima; rótulo do NUP alterado; sem botão Histórico) =========
 
 function viewFormulario() {
   return `
@@ -290,16 +319,7 @@ function bindTabela(container, refresh, onPickRow) {
   container.querySelectorAll("tr[data-id]").forEach(tr => {
     const id = tr.getAttribute("data-id");
     const nup = tr.getAttribute("data-nup");
-    const select = tr.querySelector(".status-select");
 
-    // Alteração de status direto na lista
-    select.addEventListener("change", async (ev) => {
-      ev.stopPropagation();
-      try { await updateStatus(id, select.value); await refresh(); }
-      catch (e) { alert("Erro ao atualizar status: " + e.message); }
-    });
-
-    // Clique na linha: seleciona processo no formulário + histórico
     tr.addEventListener("click", async () => {
       onPickRow(id);
       try {
@@ -309,6 +329,23 @@ function bindTabela(container, refresh, onPickRow) {
         const pane = document.getElementById("hist-pane");
         pane.innerHTML = viewHistorico(`Histórico — ${nup}`, hist);
       } catch (e) { alert("Erro ao carregar histórico: " + e.message); }
+    });
+  });
+
+  // botões de ordenação
+  container.querySelectorAll(".sort-btn").forEach(btn => {
+    btn.addEventListener("click", (ev) => {
+      const k = btn.getAttribute("data-k");
+      const d = btn.getAttribute("data-d");
+      container.dispatchEvent(new CustomEvent("sortchange", { detail: {key:k, dir:d} }));
+      ev.stopPropagation();
+    });
+  });
+  container.querySelectorAll("th[data-sort-key] .th-label").forEach(lbl => {
+    lbl.addEventListener("click", () => {
+      const th = lbl.closest("th");
+      const k = th.getAttribute("data-sort-key");
+      container.dispatchEvent(new CustomEvent("sorttoggle", { detail: {key:k} }));
     });
   });
 }
@@ -349,6 +386,7 @@ export default {
     const $msg = el("#msg-novo");
     const gridWrap = el("#grid");
     const histPane = el("#hist-pane");
+    const root = container;
 
     // Estado
     let currentAction = null;   // 'update' | 'create' | null
@@ -362,6 +400,11 @@ export default {
     let viewData = [];
 
     const sort = { key:"atualizado", dir:"desc" };
+
+    // Ajuste de alturas para não haver rolagem da página
+    const resizeAll = () => applyHeights(root);
+    window.addEventListener("resize", resizeAll);
+    setTimeout(resizeAll, 0);
 
     // NUP máscara
     $nup.addEventListener("input", () => { $nup.value = maskNUP(onlyDigits17($nup.value)); });
@@ -413,6 +456,7 @@ export default {
           id: r.id,
           nup: r.nup, tipo: r.tipo, status: r.status,
           entrada: r.entrada_regional || "",
+          atualizadoPor: r.modificado_por || "",
           atualizado: r.updated_at ? new Date(r.updated_at).getTime() : 0,
           atualizadoStr: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
           prazoDisplay: prazoStr,
@@ -430,6 +474,7 @@ export default {
           case "status": return v.status || "";
           case "entrada": return v.entradaTS ?? -Infinity;
           case "prazo": return (v.prazoDisplay === "Sobrestado") ? Number.POSITIVE_INFINITY : (v.prazoTS ?? Number.POSITIVE_INFINITY);
+          case "atualizadoPor": return v.atualizadoPor || "";
           case "atualizado": return v.atualizado ?? 0;
           default: return "";
         }
@@ -440,17 +485,22 @@ export default {
     }
     function renderGrid() {
       const view = applySort();
-      gridWrap.innerHTML = viewTabela(view, sort, STATUS);
+      gridWrap.innerHTML = viewTabela(view, sort);
       bindTabela(gridWrap, refresh, onPickRowFromList);
-      // Ordenação por clique no cabeçalho
-      gridWrap.querySelectorAll("th[data-sort-key]").forEach(th => {
-        th.addEventListener("click", () => {
-          const key = th.getAttribute("data-sort-key");
-          if (sort.key === key) sort.dir = sort.dir === "asc" ? "desc" : "asc";
-          else { sort.key = key; sort.dir = "asc"; }
-          renderGrid();
-        });
+
+      // Eventos dos botões de ordenação
+      gridWrap.addEventListener("sortchange", (ev) => {
+        sort.key = ev.detail.key;
+        sort.dir = ev.detail.dir;
+        renderGrid();
       });
+      gridWrap.addEventListener("sorttoggle", (ev) => {
+        const k = ev.detail.key;
+        if (sort.key === k) sort.dir = sort.dir === "asc" ? "desc" : "asc";
+        else { sort.key = k; sort.dir = "asc"; }
+        renderGrid();
+      });
+
       if (currentRowId) {
         const tr = gridWrap.querySelector(`tr[data-id="${currentRowId}"]`);
         if (tr) tr.classList.add("row-selected");
@@ -532,6 +582,7 @@ export default {
         prazosMap = calcularPrazosMapa(allList, historicos);
         buildViewData();
         renderGrid();
+        resizeAll();
       } catch (e) {
         gridWrap.innerHTML = `<p>Erro ao carregar: ${e.message}</p>`;
       }
