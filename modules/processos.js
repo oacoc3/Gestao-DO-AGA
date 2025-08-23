@@ -1,5 +1,5 @@
 // modules/processos.js
-// Observação de siglas usadas neste arquivo:
+// Siglas usadas:
 // - CRUD: Create, Read, Update, Delete (Criar, Ler, Atualizar, Excluir)
 
 import { supabase } from "../supabaseClient.js";
@@ -12,7 +12,35 @@ const STATUS = [
   "Publicação de Portaria", "Concluído", "Remoção/Rebaixamento", "Término de Obra"
 ];
 
-// --------- Acesso ao banco ---------
+// ========= Utilitários: máscara/validação do NUP =========
+
+/** Remove tudo que não for dígito e limita a 17 algarismos */
+function onlyDigits17(value) {
+  return (value || "").replace(/\D/g, "").slice(0, 17);
+}
+
+/** Aplica o formato 00000.000000/0000-00 sobre uma string com até 17 dígitos */
+function maskNUP(digits) {
+  const d = onlyDigits17(digits);
+  const len = d.length;
+  if (len === 0) return "";
+  if (len <= 5) return d;
+  if (len <= 11) return d.slice(0, 5) + "." + d.slice(5);
+  if (len <= 15) return d.slice(0, 5) + "." + d.slice(5, 11) + "/" + d.slice(11);
+  return (
+    d.slice(0, 5) + "." +
+    d.slice(5, 11) + "/" +
+    d.slice(11, 15) + "-" +
+    d.slice(15, 17)
+  );
+}
+
+/** Retorna true se houver 17 dígitos (NUP completo) */
+function isFullNUP(value) {
+  return onlyDigits17(value).length === 17;
+}
+
+// ========= Acesso ao banco =========
 
 async function listProcessos() {
   const { data, error } = await supabase
@@ -28,8 +56,8 @@ async function getProcessoByNup(nup) {
   const { data, error } = await supabase
     .from("processos")
     .select("*")
-    .eq("nup", nup)
-    .maybeSingle(); // data = objeto ou null
+    .eq("nup", nup) // buscamos pelo NUP já mascarado
+    .maybeSingle();
   if (error) throw error;
   return data;
 }
@@ -65,10 +93,9 @@ async function getHistorico(processoId) {
   return data;
 }
 
-// --------- Views auxiliares (tabela permanece igual) ---------
+// ========= Tabela (inalterada) =========
 
 function viewTabela(list) {
-  // Mantida exatamente como antes (não solicitado alterar a grade)
   return `
     <table class="table">
       <thead>
@@ -107,7 +134,7 @@ function viewTabela(list) {
   `;
 }
 
-// --------- Novo formulário (conforme solicitado) ---------
+// ========= Formulário (com máscara de NUP) =========
 
 function viewFormulario() {
   return `
@@ -117,7 +144,7 @@ function viewFormulario() {
       <div class="row" style="align-items:flex-end">
         <div>
           <label>NUP</label>
-          <input id="f-nup" placeholder="00000.000000/0000-00" />
+          <input id="f-nup" inputmode="numeric" autocomplete="off" placeholder="00000.000000/0000-00" />
         </div>
         <div style="flex:0 0 auto">
           <button id="btn-buscar">Buscar</button>
@@ -154,7 +181,7 @@ function viewFormulario() {
   `;
 }
 
-// --------- Comportamento do formulário ---------
+// ========= Comportamento =========
 
 function bindTabela(container, refresh) {
   container.querySelectorAll("tr[data-id]").forEach(tr => {
@@ -187,7 +214,6 @@ export default {
   title: "Processos",
   route: "#/processos",
   async view(container) {
-    // Renderização inicial
     container.innerHTML = `
       <div class="container">
         ${viewFormulario()}
@@ -198,7 +224,6 @@ export default {
       </div>
     `;
 
-    // Referências dos elementos do formulário
     const el = (sel) => container.querySelector(sel);
     const $nup     = el("#f-nup");
     const $tipo    = el("#f-tipo");
@@ -209,13 +234,17 @@ export default {
     const $msg     = el("#msg-novo");
     const grid     = el("#grid");
 
-    // Estado interno simples do formulário
-    let currentAction = null;     // 'update' | 'create' | null
-    let currentRowId = null;      // id do processo quando encontrado
-    let originalStatus = null;    // status antes de editar (para habilitar o Salvar somente se mudar)
-    let pendingNup = "";          // NUP digitado quando for criar
+    let currentAction = null;   // 'update' | 'create' | null
+    let currentRowId = null;
+    let originalStatus = null;
+    let pendingNup = "";
 
-    // Utilidades de UI
+    // === Máscara: em cada digitação, manter só dígitos e aplicar formato ===
+    $nup.addEventListener("input", () => {
+      const digits = onlyDigits17($nup.value);
+      $nup.value = maskNUP(digits);
+    });
+
     function resetForm() {
       $msg.textContent = "";
       $tipo.value = "";
@@ -231,13 +260,13 @@ export default {
       pendingNup = "";
     }
 
-    function setCreateMode(nup) {
-      pendingNup = nup;
+    function setCreateMode(nupMasked) {
+      pendingNup = nupMasked;
       $msg.textContent = "Preencha os campos e clique em Salvar.";
       $tipo.disabled = false;
       $entrada.disabled = false;
       $status.disabled = false;
-      $salvar.disabled = false; // pode salvar quando todos obrigatórios estiverem preenchidos (validação abaixo)
+      $salvar.disabled = false;
       currentAction = "create";
     }
 
@@ -246,23 +275,19 @@ export default {
       currentRowId = row.id;
       originalStatus = row.status;
 
-      // Preenche campos
       $tipo.value = row.tipo || "";
       $entrada.value = row.entrada_regional || "";
       $status.value = row.status || "";
 
-      // Travar Tipo e 1ª Entrada; Status liberado
       $tipo.disabled = true;
       $entrada.disabled = true;
       $status.disabled = false;
 
-      // O botão Salvar só habilita se o usuário mudar o Status
-      $salvar.disabled = true;
+      $salvar.disabled = true; // habilita só se mudar o status
       $msg.textContent = "Processo encontrado. Altere o Status se necessário e clique em Salvar.";
     }
 
     function perguntaCriar(onDecide) {
-      // Mensagem com botões Sim/Não (sem alterar layout geral)
       $msg.innerHTML = `
         Processo não encontrado, gostaria de criar?
         <button id="btn-sim" style="margin-left:8px">Sim</button>
@@ -279,7 +304,6 @@ export default {
       return true;
     }
 
-    // Regras de habilitação do botão Salvar durante edição (update)
     $status.addEventListener("change", () => {
       if (currentAction === "update") {
         $salvar.disabled = ($status.value === originalStatus || !$status.value);
@@ -288,24 +312,24 @@ export default {
 
     // Clique em Buscar
     $buscar.addEventListener("click", async () => {
-      const nup = ($nup.value || "").trim();
-      if (!nup) {
-        $msg.textContent = "Informe o NUP.";
+      const digits = onlyDigits17($nup.value);
+      if (digits.length !== 17) {
+        $msg.textContent = "Informe um NUP completo (17 dígitos).";
         $nup.focus();
         return;
       }
+      const nupMasked = maskNUP(digits);
 
       resetForm(); // limpa e bloqueia campos antes de buscar
       $msg.textContent = "Buscando...";
 
       try {
-        const row = await getProcessoByNup(nup);
+        const row = await getProcessoByNup(nupMasked);
         if (row) {
           setUpdateMode(row);
         } else {
-          // Pergunta se deseja criar
           perguntaCriar((decisao) => {
-            if (decisao) setCreateMode(nup);
+            if (decisao) setCreateMode(nupMasked);
             else resetForm();
           });
         }
@@ -314,11 +338,10 @@ export default {
       }
     });
 
-    // Clique em Salvar (criar OU atualizar status)
+    // Clique em Salvar
     $salvar.addEventListener("click", async () => {
       try {
         if (currentAction === "update") {
-          // Atualiza apenas o Status
           if ($status.value === originalStatus || !$status.value) {
             alert("Altere o Status para salvar.");
             return;
@@ -329,20 +352,17 @@ export default {
           $salvar.disabled = true;
           await refresh();
         } else if (currentAction === "create") {
-          // Validação simples de obrigatórios
           if (!validarObrigatoriosParaCriar()) return;
 
           const payload = {
-            nup: pendingNup,
+            nup: pendingNup,                 // já no formato 00000.000000/0000-00
             tipo: $tipo.value,
             status: $status.value,
-            entrada_regional: $entrada.value,
-            // Os campos 'prazo_saida_regional' e 'saida_regional' NÃO são usados aqui
+            entrada_regional: $entrada.value
           };
 
           await createProcesso(payload);
           $msg.textContent = "Processo criado com sucesso.";
-          // Após criar, bloqueia campos como se tivesse encontrado (modo update)
           const novo = await getProcessoByNup(pendingNup);
           if (novo) setUpdateMode(novo);
           await refresh();
@@ -366,8 +386,7 @@ export default {
       }
     };
 
-    // Estado inicial do formulário (apenas NUP habilitado)
-    resetForm();
+    resetForm();      // estado inicial: só NUP habilitado
     await refresh();
   },
 };
