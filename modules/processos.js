@@ -1,6 +1,7 @@
 // modules/processos.js
 // Siglas usadas:
 // - CRUD: Create, Read, Update, Delete (Criar, Ler, Atualizar, Excluir)
+// - RLS: Row Level Security (Segurança em nível de linha)
 
 import { supabase } from "../supabaseClient.js";
 
@@ -81,6 +82,15 @@ async function updateStatus(id, newStatus) {
     .single();
   if (error) throw error;
   return data;
+}
+
+async function deleteProcesso(id) {
+  const { error } = await supabase
+    .from("processos")
+    .delete()
+    .eq("id", id);
+  if (error) throw error;
+  return true;
 }
 
 async function getHistorico(processoId) {
@@ -175,6 +185,7 @@ function viewFormulario() {
 
       <div style="margin-top:12px">
         <button id="btn-salvar" disabled>Salvar</button>
+        <button id="btn-excluir" disabled style="margin-left:8px">Excluir</button>
       </div>
 
       <div id="msg-novo" class="small" style="margin-top:8px"></div>
@@ -233,6 +244,7 @@ export default {
     const $buscar  = el("#btn-buscar");
     const $limpar  = el("#btn-limpar");
     const $salvar  = el("#btn-salvar");
+    const $excluir = el("#btn-excluir");
     const $msg     = el("#msg-novo");
     const grid     = el("#grid");
 
@@ -241,13 +253,13 @@ export default {
     let originalStatus = null;
     let pendingNup = "";
 
-    // === Máscara: em cada digitação, manter só dígitos e aplicar formato ===
+    // === Máscara do NUP ===
     $nup.addEventListener("input", () => {
       const digits = onlyDigits17($nup.value);
       $nup.value = maskNUP(digits);
     });
 
-    // resetForm: agora aceita 'clearNup' para limpar o campo quando solicitado
+    // Reset padrão (aceita limpar também o NUP)
     function resetForm(clearNup = false) {
       $msg.textContent = "";
       if (clearNup) $nup.value = "";
@@ -258,6 +270,7 @@ export default {
       $entrada.disabled = true;
       $status.disabled = true;
       $salvar.disabled = true;
+      $excluir.disabled = true;
       currentAction = null;
       currentRowId = null;
       originalStatus = null;
@@ -271,6 +284,7 @@ export default {
       $entrada.disabled = false;
       $status.disabled = false;
       $salvar.disabled = false;
+      $excluir.disabled = true; // só em update
       currentAction = "create";
     }
 
@@ -288,7 +302,8 @@ export default {
       $status.disabled = false;
 
       $salvar.disabled = true; // habilita só se mudar o status
-      $msg.textContent = "Processo encontrado. Altere o Status se necessário e clique em Salvar.";
+      $excluir.disabled = false;
+      $msg.textContent = "Processo encontrado. Altere o Status se necessário e clique em Salvar (ou Excluir).";
     }
 
     function perguntaCriar(onDecide) {
@@ -314,7 +329,7 @@ export default {
       }
     });
 
-    // Clique em Buscar
+    // Buscar
     $buscar.addEventListener("click", async () => {
       const digits = onlyDigits17($nup.value);
       if (digits.length !== 17) {
@@ -324,7 +339,7 @@ export default {
       }
       const nupMasked = maskNUP(digits);
 
-      resetForm(false); // limpa demais campos, mantém o NUP visível durante a busca
+      resetForm(false); // mantém o NUP visível durante a busca
       $msg.textContent = "Buscando...";
 
       try {
@@ -342,14 +357,14 @@ export default {
       }
     });
 
-    // Botão Limpar (limpa apenas o NUP e reseta o formulário)
+    // Limpar (NUP + reset)
     $limpar.addEventListener("click", () => {
       resetForm(true);
       $msg.textContent = "NUP limpo.";
       $nup.focus();
     });
 
-    // Clique em Salvar
+    // Salvar (update/create)
     $salvar.addEventListener("click", async () => {
       try {
         if (currentAction === "update") {
@@ -385,6 +400,26 @@ export default {
       }
     });
 
+    // Excluir (somente quando em update)
+    $excluir.addEventListener("click", async () => {
+      if (currentAction !== "update" || !currentRowId) {
+        alert("Busque um processo existente antes de excluir.");
+        return;
+      }
+      const confirmar = confirm("Tem certeza que deseja excluir este processo? Esta ação não pode ser desfeita.");
+      if (!confirmar) return;
+
+      try {
+        await deleteProcesso(currentRowId);
+        $msg.textContent = "Processo excluído com sucesso.";
+        resetForm(true);
+        $nup.focus();
+        await refresh();
+      } catch (e) {
+        alert("Erro ao excluir: " + e.message);
+      }
+    });
+
     // --------- Lista (grid) ---------
     const refresh = async () => {
       grid.textContent = "Carregando...";
@@ -397,7 +432,7 @@ export default {
       }
     };
 
-    resetForm();      // estado inicial: só NUP habilitado
+    resetForm();      // estado inicial
     await refresh();
   },
 };
