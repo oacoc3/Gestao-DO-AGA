@@ -163,7 +163,84 @@ function calcularPrazosMapa(processos, historicos) {
   return prazos;
 }
 
-// ========= Tabela (ajustada: remove "Saída Regional" e renomeia "Prazo Regional") =========
+// ========= Modal (popup) para Histórico =========
+
+function ensureHistoryModal() {
+  let modal = document.getElementById("hist-modal");
+  if (modal) return modal;
+
+  modal = document.createElement("div");
+  modal.id = "hist-modal";
+  modal.style.position = "fixed";
+  modal.style.inset = "0";
+  modal.style.display = "none";
+  modal.style.alignItems = "center";
+  modal.style.justifyContent = "center";
+  modal.style.background = "rgba(0,0,0,0.4)";
+  modal.style.zIndex = "1000";
+
+  modal.innerHTML = `
+    <div style="background:#fff; max-width:900px; width:90%; border-radius:8px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.2)">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
+        <h3 id="hist-title" style="margin:0">Histórico</h3>
+        <button id="hist-close">Fechar</button>
+      </div>
+      <div id="hist-body" style="max-height:60vh; overflow:auto"></div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  // Fecha ao clicar no X ou fora do conteúdo
+  modal.querySelector("#hist-close").onclick = () => (modal.style.display = "none");
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) modal.style.display = "none";
+  });
+  // Fecha com ESC
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") modal.style.display = "none";
+  });
+
+  return modal;
+}
+
+function showHistoryModal(titulo, hist) {
+  const modal = ensureHistoryModal();
+  modal.querySelector("#hist-title").textContent = titulo;
+
+  const rows = (hist || []).map(h => {
+    const autor = h.changed_by_email || h.changed_by || "(desconhecido)";
+    const quando = new Date(h.changed_at).toLocaleString();
+    const de = h.old_status ?? "(criação)";
+    const para = h.new_status ?? "(sem status)";
+    return `<tr>
+      <td>${quando}</td>
+      <td>${de}</td>
+      <td>${para}</td>
+      <td>${autor}</td>
+    </tr>`;
+  }).join("");
+
+  modal.querySelector("#hist-body").innerHTML = `
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Data/Hora</th>
+          <th>De</th>
+          <th>Para</th>
+          <th>Por</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows || `<tr><td colspan="4">Sem histórico.</td></tr>`}
+      </tbody>
+    </table>
+  `;
+
+  modal.style.display = "flex";
+}
+
+// ========= Tabela (ajustada) =========
 
 function viewTabela(list, prazosMap) {
   return `
@@ -181,28 +258,34 @@ function viewTabela(list, prazosMap) {
         </tr>
       </thead>
       <tbody>
-        ${list.map(row => `
-          <tr data-id="${row.id}">
-            <td>${row.nup}</td>
-            <td>${row.tipo}</td>
-            <td>
-              <select class="status-select">
-                ${STATUS.map(s => `<option ${s === row.status ? "selected" : ""}>${s}</option>`).join("")}
-              </select>
-            </td>
-            <td>${row.entrada_regional ?? ""}</td>
-            <td>${prazosMap.get(row.id) ?? ""}</td>
-            <td class="right small">${row.modificado_por ?? ""}</td>
-            <td class="small">${new Date(row.updated_at).toLocaleString()}</td>
-            <td><button class="btn-historico">Histórico</button></td>
-          </tr>
-        `).join("")}
+        ${list.map(row => {
+          // Regra 1: se estiver Sobrestado, mostra "Sobrestado"
+          const prazoCell = SOBRESTADOS.has(row.status)
+            ? "Sobrestado"
+            : (prazosMap.get(row.id) ?? "");
+          return `
+            <tr data-id="${row.id}" data-nup="${row.nup}">
+              <td>${row.nup}</td>
+              <td>${row.tipo}</td>
+              <td>
+                <select class="status-select">
+                  ${STATUS.map(s => `<option ${s === row.status ? "selected" : ""}>${s}</option>`).join("")}
+                </select>
+              </td>
+              <td>${row.entrada_regional ?? ""}</td>
+              <td>${prazoCell}</td>
+              <td class="right small">${row.modificado_por ?? ""}</td>
+              <td class="small">${new Date(row.updated_at).toLocaleString()}</td>
+              <td><button class="btn-historico">Histórico</button></td>
+            </tr>
+          `;
+        }).join("")}
       </tbody>
     </table>
   `;
 }
 
-// ========= Formulário (inalterado nas últimas regras) =========
+// ========= Formulário =========
 
 function viewFormulario() {
   return `
@@ -256,7 +339,9 @@ function viewFormulario() {
 function bindTabela(container, refresh) {
   container.querySelectorAll("tr[data-id]").forEach(tr => {
     const id = tr.getAttribute("data-id");
+    const nup = tr.getAttribute("data-nup");
     const select = tr.querySelector(".status-select");
+
     select.addEventListener("change", async () => {
       const newStatus = select.value;
       try {
@@ -266,18 +351,11 @@ function bindTabela(container, refresh) {
         alert("Erro ao atualizar status: " + e.message);
       }
     });
+
     tr.querySelector(".btn-historico").addEventListener("click", async () => {
       try {
         const hist = await getHistorico(id);
-        alert(hist.length
-          ? hist.map(h => {
-              const autor = h.changed_by_email || h.changed_by || "(desconhecido)";
-              const quando = new Date(h.changed_at).toLocaleString();
-              const de = h.old_status ?? "(criação)";
-              const para = h.new_status ?? "(sem status)";
-              return `${quando} • ${de} → ${para} • por: ${autor}`;
-            }).join("\n")
-          : "Sem histórico.");
+        showHistoryModal(`Histórico — ${nup}`, hist);
       } catch (e) {
         alert("Erro ao carregar histórico: " + e.message);
       }
@@ -489,7 +567,7 @@ export default {
       try {
         const list = await listProcessos();
 
-        // Calcula "Prazo Regional" para todos os itens, usando histórico em lote
+        // Calcula "Prazo Regional" para todos os itens
         const ids = list.map(r => r.id);
         const historicos = await getHistoricoBatch(ids);
         const prazosMap = calcularPrazosMapa(list, historicos);
