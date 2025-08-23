@@ -1,32 +1,32 @@
 /* fullwidth-overrides.css
-   Deixa TODOS os módulos (renderizados dentro do #app) ocuparem 100% da largura,
-   mantendo respiro nas laterais e responsividade. Não altera cores. */
+   Faz TODOS os módulos ocuparem 100% da largura, com responsividade.
+   Não altera cores ou componentes — só layout. */
 
-/* área de módulos em largura total */
+/* remove limite de largura apenas na área dos módulos */
 #app,
 #app .container {
   width: 100%;
-  max-width: none;          /* remove limite de largura */
+  max-width: none;      /* derruba o max-width dos temas */
 }
 
-/* respiro lateral (sem “colar” nas bordas) */
+/* respiro lateral para não colar nas bordas */
 #app .container {
   padding-left: 16px;
   padding-right: 16px;
 }
 
-/* cartões e tabelas ocupam 100% da faixa disponível */
+/* componentes internos usam toda a faixa disponível */
 #app .card { width: 100%; }
 #app .table { width: 100%; table-layout: fixed; }
 
-/* inputs/selects dentro de tabelas não “estouram” colunas */
+/* evita que inputs/selects “estourem” célula */
 #app table input,
 #app table select,
 #app table button {
   max-width: 100%;
 }
 
-/* responsivo: reduz levemente o padding em telas pequenas */
+/* telas menores: reduz o padding lateral */
 @media (max-width: 640px) {
   #app .container { padding-left: 10px; padding-right: 10px; }
 }
