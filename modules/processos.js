@@ -163,16 +163,12 @@ function ensureLayoutCSS() {
     }
     .hist-scroll thead th { position:sticky; top:0; background:#fff; z-index:2; border-bottom:1px solid #ddd; }
 
-    /* processos (direita) – scroller interno com cabeçalho fixo */
+    /* processos (direita) – scroller interno com cabeçalho fixo e SEM rolagem lateral */
     .grid-scroll { height:100%; overflow-y:auto; overflow-x:hidden; position:relative; }
     .grid-pane .table { width:100%; table-layout:fixed; border-collapse:collapse; }
-    .grid-pane td {
+    .grid-pane td, .grid-pane th {
       font-size:12px; padding:4px 6px; text-align:center;
       white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-    }
-    .grid-pane th {
-      font-size:12px; padding:4px 6px; text-align:center;
-      white-space:nowrap; overflow:visible;
     }
     .grid-scroll thead th { position:sticky; top:0; background:#fff; z-index:3; }
 
@@ -224,17 +220,18 @@ function thSort(key, labelHtml, sort) {
    Tabela (status só exibe)
    ========================= */
 function viewTabela(listView, sort) {
+  // Larguras 100% (sem rolagem lateral) e cabeçalho com duas linhas em "1ª Entrada Regional" e "Prazo Regional"
   return `
     <div class="grid-scroll">
       <table class="table">
         <colgroup>
-          <col style="width:21ch">   <!-- NUP: cabe inteiro (20 caracteres), sem sobra excessiva -->
-          <col style="width:12ch">
-          <col style="width:18ch">
-          <col style="width:14ch">   <!-- 1ª Entrada em duas linhas no título -->
-          <col style="width:12ch">   <!-- Prazo em duas linhas no título -->
-          <col style="width:18ch">
-          <col style="width:16ch">
+          <col style="width:24%">  <!-- NUP: suficiente p/ exibir inteiro em telas comuns -->
+          <col style="width:10%">
+          <col style="width:15%">
+          <col style="width:11%">  <!-- 1ª Entrada (título em 2 linhas) -->
+          <col style="width:9%">   <!-- Prazo (título em 2 linhas) -->
+          <col style="width:15%">
+          <col style="width:16%">
         </colgroup>
         <thead>
           <tr>
@@ -284,8 +281,6 @@ function viewHistorico(title, hist) {
           <colgroup>
             <col style="width:22%"><col style="width:26%"><col style="width:26%"><col style="width:26%">
           </colgroup>
-        </table>
-        <table class="table">
           <thead>
             <tr><th>Data/Hora</th><th>De</th><th>Para</th><th>Por</th></tr>
           </thead>
@@ -404,7 +399,7 @@ export default {
       </div>
     `;
 
-    // referências
+    // refs
     const el = (s) => container.querySelector(s);
     const $nup = el("#f-nup");
     const $tipo = el("#f-tipo");
