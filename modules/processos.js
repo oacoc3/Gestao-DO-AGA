@@ -146,13 +146,13 @@ function ensureLayoutCSS() {
     .proc-form-row label { font-size:0.95rem; margin-bottom:2px; }
     .proc-form-row input, .proc-form-row select, .proc-form-row button { height:34px; }
 
-    /* área dividida: 40% histórico, 60% processos */
+    /* área dividida: 35% histórico, 65% processos */
     .proc-split { display:flex; gap:10px; overflow:hidden; }
     .proc-pane { min-width:0; display:flex; flex-direction:column; overflow:hidden; }
-    .hist-pane { flex:0 0 40%; }
-    .grid-pane { flex:1 1 60%; }
+    .hist-pane { flex:0 0 35%; }
+    .grid-pane { flex:1 1 65%; }
     .pane-title { margin:0 0 8px 0; }
-    .pane-body { flex:1 1 auto; min-height:0; overflow:hidden; } /* o scroller é o filho interno */
+    .pane-body { flex:1 1 auto; min-height:0; overflow:hidden; } /* scroller é o filho interno */
 
     /* histórico (esquerda) – scroller interno */
     .hist-scroll { height:100%; overflow:auto; }
@@ -172,13 +172,14 @@ function ensureLayoutCSS() {
     }
     .grid-pane th {
       font-size:12px; padding:4px 6px; text-align:center;
-      white-space:nowrap; /* importante para o rótulo + botões */
-      overflow:visible;   /* deixa os botões sempre visíveis */
+      white-space:nowrap; overflow:visible;
     }
     .grid-scroll thead th { position:sticky; top:0; background:#fff; z-index:3; }
 
-    /* botões de ordenação sempre visíveis */
-    .sort-wrap { display:inline-flex; gap:2px; margin-left:4px; vertical-align:middle; }
+    /* botões de ordenação em PILHA (abaixo do título) */
+    .th-stack { display:flex; flex-direction:column; align-items:center; gap:2px; }
+    .th-label { display:block; }
+    .sort-wrap { display:inline-flex; gap:2px; }
     .sort-btn { border:1px solid #ccc; background:#f7f7f7; padding:0 4px; line-height:16px; height:18px; cursor:pointer; }
     .sort-btn.active { background:#e9e9e9; font-weight:bold; }
 
@@ -208,11 +209,13 @@ function applyHeights(root) {
 function thSort(key, label, sort) {
   return `
     <th data-sort-key="${key}">
-      <span class="th-label" style="cursor:pointer">${label}</span>
-      <span class="sort-wrap">
-        <button class="sort-btn ${sort.key===key && sort.dir==='asc' ? 'active':''}" data-k="${key}" data-d="asc">▲</button>
-        <button class="sort-btn ${sort.key===key && sort.dir==='desc' ? 'active':''}" data-k="${key}" data-d="desc">▼</button>
-      </span>
+      <div class="th-stack">
+        <span class="th-label" data-k="${key}" style="cursor:pointer">${label}</span>
+        <span class="sort-wrap">
+          <button class="sort-btn ${sort.key===key && sort.dir==='asc' ? 'active':''}" data-k="${key}" data-d="asc">▲</button>
+          <button class="sort-btn ${sort.key===key && sort.dir==='desc' ? 'active':''}" data-k="${key}" data-d="desc">▼</button>
+        </span>
+      </div>
     </th>
   `;
 }
@@ -225,13 +228,13 @@ function viewTabela(listView, sort) {
     <div class="grid-scroll">
       <table class="table">
         <colgroup>
-          <col style="width:16%">
-          <col style="width:12%">
-          <col style="width:18%">
-          <col style="width:12%">
-          <col style="width:12%">
-          <col style="width:15%">
-          <col style="width:15%">
+          <col style="width:22ch">   <!-- NUP: cabe inteiro -->
+          <col style="width:12ch">
+          <col style="width:18ch">
+          <col style="width:20ch">   <!-- 1ª Entrada Regional (título) -->
+          <col style="width:12ch">
+          <col style="width:18ch">
+          <col style="width:16ch">
         </colgroup>
         <thead>
           <tr>
@@ -279,7 +282,7 @@ function viewHistorico(title, hist) {
       <div class="hist-scroll">
         <table class="table">
           <colgroup>
-            <col style="width:34%"><col style="width:22%"><col style="width:22%"><col style="width:22%">
+            <col style="width:28%"><col style="width:24%"><col style="width:24%"><col style="width:24%">
           </colgroup>
           <thead>
             <tr><th>Data/Hora</th><th>De</th><th>Para</th><th>Por</th></tr>
