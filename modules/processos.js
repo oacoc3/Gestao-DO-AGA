@@ -1,10 +1,13 @@
 // modules/processos.js
-// Siglas usadas:
+// Siglas (expansão):
 // - CRUD: Create, Read, Update, Delete (Criar, Ler, Atualizar, Excluir)
 // - RLS: Row Level Security (Segurança em nível de linha)
 
 import { supabase } from "../supabaseClient.js";
 
+/* =========================
+   Constantes de domínio
+   ========================= */
 const TIPOS = ["PDIR", "Inscrição/Alteração", "Exploração", "OPEA"];
 const STATUS = [
   "Análise Documental", "Análise Técnica Preliminar", "Análise Técnica",
@@ -14,7 +17,7 @@ const STATUS = [
 ];
 
 /* =========================
-   Formatação do NUP
+   Máscara / validação NUP
    ========================= */
 function onlyDigits17(value) {
   return (value || "").replace(/\D/g, "").slice(0, 17);
@@ -31,17 +34,8 @@ function maskNUP(digits) {
 const isFullNUP = (v) => onlyDigits17(v).length === 17;
 
 /* =========================
-   Supabase
+   Acesso Supabase (CRUD)
    ========================= */
-async function listProcessos() {
-  const { data, error } = await supabase
-    .from("processos")
-    .select("*")
-    .order("updated_at", { ascending: false })
-    .limit(500);
-  if (error) throw error;
-  return data;
-}
 async function getProcessoByNup(nup) {
   const { data, error } = await supabase
     .from("processos")
@@ -95,13 +89,13 @@ async function getHistoricoBatch(ids) {
 }
 
 /* =========================
-   Cálculo de Prazo Regional
+   Cálculo Prazo Regional
    ========================= */
 const SOBRESTADOS = new Set(["Sobrestado Técnico", "Sobrestado Documental"]);
 const DIA_MS = 24 * 60 * 60 * 1000;
 
 function calcularPrazosMapa(processos, historicos) {
-  // pega a última saída de sobrestado de cada processo
+  // última saída de sobrestado por processo
   const saidaSobMap = new Map();
   for (const h of historicos) {
     const saiuDeSob = SOBRESTADOS.has(h.old_status) && !SOBRESTADOS.has(h.new_status);
@@ -126,38 +120,48 @@ function calcularPrazosMapa(processos, historicos) {
   }
   return prazos;
 }
+function calcularPrazoUnit(p, hist = []) {
+  if (SOBRESTADOS.has(p.status)) return "Sobrestado";
+  let base = p.entrada_regional ? new Date(p.entrada_regional) : null;
+  for (const h of hist) {
+    const saiuDeSob = SOBRESTADOS.has(h.old_status) && !SOBRESTADOS.has(h.new_status);
+    if (saiuDeSob) {
+      const t = new Date(h.changed_at);
+      if (!base || t > base) base = t;
+    }
+  }
+  return base ? new Date(base.getTime() + 60 * DIA_MS).toISOString().slice(0, 10) : "";
+}
 
 /* =========================
-   CSS do módulo (layout via CSS GRID)
+   CSS (grid, rolagens, etc.)
    ========================= */
 function ensureLayoutCSS() {
   if (document.getElementById("proc-grid-css")) return;
   const style = document.createElement("style");
   style.id = "proc-grid-css";
   style.textContent = `
-    /* sem rolagem de página */
+    /* Sem rolagem de página */
     html, body { overflow: hidden; }
 
     .proc-mod { display:flex; flex-direction:column; overflow:hidden; }
 
-    /* formulário compacto */
+    /* Formulário compacto */
     .proc-form-card { flex:0 0 auto; padding-top:8px; padding-bottom:8px; }
     .proc-form-row { display:flex; align-items:flex-end; gap:8px; flex-wrap:nowrap; overflow:auto; }
     .proc-form-row > div { display:flex; flex-direction:column; }
     .proc-form-row label { font-size:0.95rem; margin-bottom:2px; }
     .proc-form-row input, .proc-form-row select, .proc-form-row button { height:34px; }
 
-    /* área dividida: 35% histórico, 65% processos */
+    /* Split 35%/65% */
     .proc-split { display:flex; gap:10px; overflow:hidden; }
     .proc-pane { min-width:0; display:flex; flex-direction:column; overflow:hidden; }
     .hist-pane { flex:0 0 35%; }
     .grid-pane { flex:1 1 65%; }
     .pane-title { margin:0 0 8px 0; }
-    .pane-body { flex:1 1 auto; min-height:0; overflow:hidden; display:flex; } /* permite rolagem interna */
+    .pane-body { flex:1 1 auto; min-height:0; overflow:hidden; display:flex; } /* rolagem interna */
 
-    /* =======================
-       LISTA DE PROCESSOS (GRID)
-       ======================= */
+    /* Grid de processos */
     :root{
       --w-nup: clamp(20ch, 22ch, 26ch);
       --w-tipo: clamp(8ch, 10ch, 14ch);
@@ -165,32 +169,27 @@ function ensureLayoutCSS() {
       --w-prazo: clamp(8ch, 10ch, 12ch);
     }
 
-    /* #grid ocupa todo o espaço da pane-body */
     #grid{ flex:1 1 auto; min-height:0; display:flex; }
-
-    /* roletador vertical interno (sem height:100%; usa flex) */
     .grid-scroll { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; position:relative; }
 
     .proc-grid-header,
     .proc-grid-row{
       display: grid;
       grid-template-columns:
-        var(--w-nup)           /* NUP */
-        var(--w-tipo)          /* Tipo */
-        minmax(0, 1.4fr)       /* Status (flex) */
-        var(--w-entrada)       /* 1ª Entrada Regional */
-        var(--w-prazo)         /* Prazo Regional */
-        minmax(0, 1fr)         /* Atualizado por (flex) */
-        minmax(0, 1fr);        /* Atualizado em (flex) */
+        var(--w-nup)
+        var(--w-tipo)
+        minmax(0, 1.4fr)
+        var(--w-entrada)
+        var(--w-prazo)
+        minmax(0, 1fr)
+        minmax(0, 1fr);
       gap: 0;
       align-items: center;
     }
-
     .proc-grid-header{
       position: sticky; top: 0; z-index: 3;
       background:#fff; border-bottom:1px solid #ddd;
     }
-
     .proc-grid-header > div,
     .proc-grid-row > div{
       white-space: nowrap;
@@ -201,19 +200,16 @@ function ensureLayoutCSS() {
       font-size: 12px;
     }
 
-    /* Título + botões de ordenação empilhados */
+    /* Título + botões (ordenadores) empilhados */
     .hdc { display:flex; flex-direction:column; align-items:center; gap:2px; }
     .hdc .title { line-height:1.05; }
     .sort-wrap { display:inline-flex; gap:2px; }
     .sort-btn { border:1px solid #ccc; background:#f7f7f7; padding:0 4px; line-height:16px; height:18px; cursor:pointer; }
     .sort-btn.active { background:#e9e9e9; font-weight:bold; }
 
-    /* Linha selecionada */
     .proc-grid-row.row-selected { outline:2px solid #999; outline-offset:-1px; }
 
-    /* =======================
-       HISTÓRICO (GRID)
-       ======================= */
+    /* Histórico */
     :root{
       --w-hist-data: clamp(12ch, 16ch, 18ch);
       --w-hist-autor: clamp(16ch, 20ch, 24ch);
@@ -224,21 +220,18 @@ function ensureLayoutCSS() {
     .hist-row{
       display:grid;
       grid-template-columns:
-        var(--w-hist-data)     /* Data/Hora */
-        minmax(0, 1fr)         /* De */
-        minmax(0, 1fr)         /* Para */
-        var(--w-hist-autor);   /* Por */
+        var(--w-hist-data)
+        minmax(0, 1fr)
+        minmax(0, 1fr)
+        var(--w-hist-autor);
       gap:0;
       align-items:center;
     }
-
     .hist-header{
       position: sticky; top: 0; z-index:2;
       background:#fff; border-bottom:1px solid #ddd;
     }
-
-    .hist-header > div,
-    .hist-row > div{
+    .hist-header > div, .hist-row > div{
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -250,14 +243,13 @@ function ensureLayoutCSS() {
   document.head.appendChild(style);
 }
 
-/* ajusta alturas de área útil para rolagem vertical interna */
 function applyHeights(root) {
   const mod = root.querySelector(".proc-mod");
   const split = root.querySelector(".proc-split");
   if (!mod || !split) return;
 
   const top = mod.getBoundingClientRect().top;
-  const available = window.innerHeight - top - 12; /* respiro */
+  const available = window.innerHeight - top - 12;
   mod.style.height = available + "px";
 
   const formH = root.querySelector(".proc-form-card").getBoundingClientRect().height;
@@ -265,7 +257,7 @@ function applyHeights(root) {
 }
 
 /* =========================
-   Ordenação (header cell)
+   UI helpers (ordenadores)
    ========================= */
 function headerCell(key, labelHtml, sort) {
   return `
@@ -280,7 +272,7 @@ function headerCell(key, labelHtml, sort) {
 }
 
 /* =========================
-   VIEW: Tabela de Processos (GRID)
+   VIEW: tabela de processos
    ========================= */
 function viewTabela(listView, sort) {
   const header = `
@@ -306,16 +298,11 @@ function viewTabela(listView, sort) {
     </div>
   `).join("");
 
-  return `
-    <div class="grid-scroll">
-      ${header}
-      ${body}
-    </div>
-  `;
+  return `<div class="grid-scroll">${header}${body}</div>`;
 }
 
 /* =========================
-   VIEW: Histórico (GRID)
+   VIEW: histórico (grid)
    ========================= */
 function viewHistorico(title, hist) {
   const header = `
@@ -325,7 +312,7 @@ function viewHistorico(title, hist) {
   `;
   const rows = (hist || []).map(h => {
     const autor = h.changed_by_email || h.changed_by || "(desconhecido)";
-    const quando = new Date(h.changed_at).toLocaleString(); // <-- corrigido (sem "the")
+    const quando = new Date(h.changed_at).toLocaleString();
     const de = h.old_status ?? "(criação)";
     const para = h.new_status ?? "(sem status)";
     return `<div class="hist-row"><div>${quando}</div><div>${de}</div><div>${para}</div><div>${autor}</div></div>`;
@@ -343,7 +330,7 @@ function viewHistorico(title, hist) {
 }
 
 /* =========================
-   Formulário (inalterado visualmente)
+   Formulário
    ========================= */
 function viewFormulario() {
   return `
@@ -382,7 +369,7 @@ function viewFormulario() {
 }
 
 /* =========================
-   Bind dos eventos da lista
+   Bind da tabela (click/ordenar)
    ========================= */
 function bindTabela(container, refresh, onPickRow) {
   // clique nas linhas
@@ -421,7 +408,61 @@ function bindTabela(container, refresh, onPickRow) {
 }
 
 /* =========================
-   Módulo
+   Paginação (keyset) + scroll
+   ========================= */
+const PAGE_SIZE = 200; // tamanho da página
+
+async function fetchPageByCursor(cursor) {
+  // Estratégia: duas consultas para emular keyset (evita OR complexo no PostgREST)
+  // 1) updated_at < cursor.updated_at
+  // 2) updated_at = cursor.updated_at AND id < cursor.id
+  if (!cursor) {
+    const { data, error } = await supabase
+      .from("processos")
+      .select("*")
+      .order("updated_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(PAGE_SIZE);
+    if (error) throw error;
+    return pack(data || []);
+  } else {
+    const { data: part1, error: e1 } = await supabase
+      .from("processos")
+      .select("*")
+      .lt("updated_at", cursor.updated_at)
+      .order("updated_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(PAGE_SIZE);
+    if (e1) throw e1;
+
+    const remain = Math.max(0, PAGE_SIZE - (part1?.length || 0));
+    let part2 = [];
+    if (remain > 0) {
+      const { data: eqdata, error: e2 } = await supabase
+        .from("processos")
+        .select("*")
+        .eq("updated_at", cursor.updated_at)
+        .lt("id", cursor.id)
+        .order("updated_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(remain);
+      if (e2) throw e2;
+      part2 = eqdata || [];
+    }
+    const rows = [...(part1 || []), ...part2];
+    return pack(rows);
+  }
+
+  function pack(rows) {
+    const nextCursor = rows.length
+      ? { updated_at: rows[rows.length - 1].updated_at, id: rows[rows.length - 1].id }
+      : null;
+    return { data: rows, nextCursor };
+  }
+}
+
+/* =========================
+   Módulo principal
    ========================= */
 export default {
   id: "processos",
@@ -472,21 +513,24 @@ export default {
     let allList = [];
     let prazosMap = new Map();
     let viewData = [];
+    let pinnedId = null; // para fixar no topo após busca
 
-    // id "pinned" para ir ao topo após busca
-    let pinnedId = null;
+    // paginação (keyset)
+    let cursor = null;
+    let hasNext = true;
+    let loadingPage = false;
 
     const sort = { key:"atualizado", dir:"desc" };
 
-    // alturas (evita rolagem da página)
+    // Alturas/rolagem interna
     const resizeAll = () => applyHeights(root);
     window.addEventListener("resize", resizeAll);
     setTimeout(resizeAll, 0);
 
-    // máscara NUP
+    // Máscara NUP
     $nup.addEventListener("input", () => { $nup.value = maskNUP(onlyDigits17($nup.value)); });
 
-    // helpers do formulário
+    // Helpers de formulário
     function resetForm(clearNup=false) {
       $msg.textContent = "";
       if (clearNup) $nup.value = "";
@@ -494,7 +538,7 @@ export default {
       $tipo.disabled = true; $entrada.disabled = true; $status.disabled = true;
       $salvar.disabled = true; $excluir.disabled = true;
       currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
-      pinnedId = null; // limpa o pino ao resetar formulário
+      pinnedId = null; // remove o pino ao limpar
     }
     function setCreateMode(nupMasked) {
       pendingNup = nupMasked; currentNupMasked = nupMasked;
@@ -527,7 +571,7 @@ export default {
       if (currentAction === "update") $salvar.disabled = ($status.value === originalStatus || !$status.value);
     });
 
-    // viewData
+    // viewData (mapeia allList -> grid)
     function buildViewData() {
       viewData = allList.map(r => {
         const prazoStr = SOBRESTADOS.has(r.status) ? "Sobrestado" : (prazosMap.get(r.id) || "");
@@ -561,7 +605,7 @@ export default {
       const arr = viewData.slice();
       arr.sort((a,b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * dir);
 
-      // se houver um "pinnedId", move essa linha para o topo
+      // pino vai para o topo
       if (pinnedId != null) {
         const idx = arr.findIndex(v => String(v.id) === String(pinnedId));
         if (idx > 0) {
@@ -569,15 +613,15 @@ export default {
           arr.unshift(item);
         }
       }
-
       return arr;
     }
+
     function renderGrid() {
       const view = applySort();
       gridWrap.innerHTML = viewTabela(view, sort);
-      bindTabela(gridWrap, refresh, onPickRowFromList);
+      bindTabela(gridWrap, refreshFirstPage, onPickRowFromList);
 
-      // ordenação
+      // eventos de ordenação
       gridWrap.addEventListener("sortchange", (ev) => {
         sort.key = ev.detail.key;
         sort.dir = ev.detail.dir;
@@ -590,21 +634,105 @@ export default {
         renderGrid();
       });
 
+      // liga o infinite scroll
+      attachInfiniteScroll();
+      // mantém linha selecionada (se houver)
       if (currentRowId) {
-        const rows = gridWrap.querySelectorAll(".proc-grid-row");
-        rows.forEach(r => { if (r.getAttribute("data-id") === String(currentRowId)) r.classList.add("row-selected"); });
+        gridWrap.querySelectorAll(".proc-grid-row").forEach(r => {
+          if (r.getAttribute("data-id") === String(currentRowId)) r.classList.add("row-selected");
+        });
       }
     }
+
+    function renderGridPreservandoScroll() {
+      const sc = gridWrap.querySelector(".grid-scroll");
+      const st = sc ? sc.scrollTop : 0;
+      renderGrid();
+      const sc2 = gridWrap.querySelector(".grid-scroll");
+      if (sc2) sc2.scrollTop = st;
+    }
+
     function onPickRowFromList(id) {
       const row = allList.find(r => String(r.id) === String(id));
       if (!row) return;
       setUpdateMode(row);
       $nup.value = row.nup;
       currentRowId = row.id;
-      // (não “pina” ao clicar na lista; só ao buscar)
+      // não fixa pino no clique (só na busca)
     }
 
-    // formulário
+    // garante que um processo buscado apareça no topo
+    async function upsertPinnedRow(row) {
+      if (!allList.some(r => String(r.id) === String(row.id))) {
+        allList.push(row);
+        const hist = await getHistorico(row.id);
+        const prazo = calcularPrazoUnit(row, hist);
+        prazosMap.set(row.id, prazo);
+        buildViewData();
+      }
+      pinnedId = row.id;
+      renderGridPreservandoScroll();
+    }
+
+    // Scroll infinito
+    function attachInfiniteScroll() {
+      const sc = gridWrap.querySelector(".grid-scroll");
+      if (!sc || sc.__bound) return;
+      sc.__bound = true;
+      sc.addEventListener("scroll", async () => {
+        if (loadingPage || !hasNext) return;
+        const nearBottom = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 200;
+        if (nearBottom) {
+          await fetchNextPage();
+        }
+      });
+    }
+
+    // Carregamento incremental
+    async function assimilateRows(rows) {
+      if (!rows || !rows.length) return;
+      allList = allList.concat(rows);
+      const ids = rows.map(r => r.id);
+      const historicos = await getHistoricoBatch(ids);
+      const prazosSub = calcularPrazosMapa(rows, historicos);
+      prazosSub.forEach((v, k) => prazosMap.set(k, v));
+      buildViewData();
+      renderGridPreservandoScroll();
+    }
+
+    async function fetchFirstPage() {
+      loadingPage = true;
+      try {
+        const { data, nextCursor } = await fetchPageByCursor(null);
+        cursor = nextCursor;
+        hasNext = !!nextCursor && (data?.length || 0) > 0;
+        allList = []; prazosMap = new Map(); viewData = [];
+        await assimilateRows(data || []);
+      } finally {
+        loadingPage = false;
+      }
+    }
+
+    async function fetchNextPage() {
+      if (!hasNext || loadingPage) return;
+      loadingPage = true;
+      try {
+        const { data, nextCursor } = await fetchPageByCursor(cursor);
+        cursor = nextCursor;
+        hasNext = !!nextCursor && (data?.length || 0) > 0;
+        await assimilateRows(data || []);
+      } finally {
+        loadingPage = false;
+      }
+    }
+
+    async function refreshFirstPage() {
+      // recarrega a primeira página (após salvar/excluir)
+      pinnedId = null;
+      await fetchFirstPage();
+    }
+
+    // Ações do formulário
     const buscar = async () => {
       if (!isFullNUP($nup.value)) {
         $msg.textContent = "Informe um NUP completo (17 dígitos)."; $nup.focus(); return;
@@ -614,10 +742,9 @@ export default {
       try {
         const row = await getProcessoByNup(nupMasked);
         if (row) {
-          setUpdateMode(row); 
+          setUpdateMode(row);
           currentRowId = row.id;
-          pinnedId = row.id; // pino para ir ao topo
-          renderGrid();
+          await upsertPinnedRow(row); // garante a 1ª linha
           const hist = await getHistorico(row.id);
           histPane.innerHTML = viewHistorico(`Histórico — ${row.nup}`, hist);
         } else {
@@ -626,16 +753,20 @@ export default {
             else { resetForm(true); histPane.innerHTML = viewHistorico("Histórico", []); $nup.focus(); }
           });
         }
-      } catch (e) { $msg.textContent = "Erro ao buscar: " + e.message; }
+      } catch (e) {
+        $msg.textContent = "Erro ao buscar: " + e.message;
+      }
     };
+
     $buscar.addEventListener("click", buscar);
     $limpar.addEventListener("click", () => {
-      resetForm(true); 
-      histPane.innerHTML = viewHistorico("Histórico", []); 
-      renderGrid(); // re-render sem o pino
-      $msg.textContent = "NUP limpo."; 
+      resetForm(true);
+      histPane.innerHTML = viewHistorico("Histórico", []);
+      renderGridPreservandoScroll();
+      $msg.textContent = "NUP limpo.";
       $nup.focus();
     });
+
     $salvar.addEventListener("click", async () => {
       try {
         if (currentAction === "update") {
@@ -643,15 +774,21 @@ export default {
           await updateStatus(currentRowId, $status.value);
           $msg.textContent = "Status atualizado com sucesso.";
           originalStatus = $status.value; $salvar.disabled = true;
-          await refresh();
+          await refreshFirstPage();
           const hist = await getHistorico(currentRowId);
           histPane.innerHTML = viewHistorico(`Histórico — ${currentNupMasked}`, hist);
         } else if (currentAction === "create") {
           if (!validarObrigatoriosParaCriar()) return;
-          const payload = { nup: pendingNup, tipo: $tipo.value, status: $status.value, entrada_regional: $entrada.value };
+          const payload = {
+            nup: pendingNup,
+            tipo: $tipo.value,
+            status: $status.value,
+            entrada_regional: $entrada.value
+          };
           const novo = await createProcesso(payload);
           $msg.textContent = "Processo criado com sucesso.";
-          setUpdateMode(novo); currentRowId = novo.id; await refresh();
+          setUpdateMode(novo); currentRowId = novo.id;
+          await refreshFirstPage();
           const hist = await getHistorico(novo.id);
           histPane.innerHTML = viewHistorico(`Histórico — ${novo.nup}`, hist);
         } else {
@@ -659,33 +796,19 @@ export default {
         }
       } catch (e) { alert("Erro ao salvar: " + e.message); }
     });
+
     $excluir.addEventListener("click", async () => {
       if (currentAction !== "update" || !currentRowId) { alert("Busque um processo existente antes de excluir."); return; }
       if (!confirm("Tem certeza que deseja excluir este processo? Esta ação não pode ser desfeita.")) return;
       try {
         await deleteProcesso(currentRowId);
         $msg.textContent = "Processo excluído com sucesso.";
-        resetForm(true); histPane.innerHTML = viewHistorico("Histórico", []); await refresh(); $nup.focus();
+        resetForm(true); histPane.innerHTML = viewHistorico("Histórico", []);
+        await refreshFirstPage(); $nup.focus();
       } catch (e) { alert("Erro ao excluir: " + e.message); }
     });
 
-    // carregar lista
-    const refresh = async () => {
-      gridWrap.innerHTML = "Carregando...";
-      try {
-        allList = await listProcessos();
-        const ids = allList.map(r => r.id);
-        const historicos = await getHistoricoBatch(ids);
-        prazosMap = calcularPrazosMapa(allList, historicos);
-        buildViewData();
-        renderGrid();
-        setTimeout(resizeAll, 0);
-      } catch (e) {
-        gridWrap.innerHTML = `<p>Erro ao carregar: ${e.message}</p>`;
-      }
-    };
-
-    resetForm();
-    await refresh();
+    // Inicialização
+    await fetchFirstPage();
   },
 };
