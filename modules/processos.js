@@ -2,6 +2,7 @@
 // Siglas usadas:
 // - CRUD: Create, Read, Update, Delete (Criar, Ler, Atualizar, Excluir)
 // - RLS: Row Level Security (Segurança em nível de linha)
+// - UUID: Universally Unique Identifier (Identificador único universal)
 
 import { supabase } from "../supabaseClient.js";
 
@@ -15,12 +16,10 @@ const STATUS = [
 
 // ========= Utilitários: máscara/validação do NUP =========
 
-/** Remove tudo que não for dígito e limita a 17 algarismos */
 function onlyDigits17(value) {
   return (value || "").replace(/\D/g, "").slice(0, 17);
 }
 
-/** Aplica o formato 00000.000000/0000-00 sobre uma string com até 17 dígitos */
 function maskNUP(digits) {
   const d = onlyDigits17(digits);
   const len = d.length;
@@ -36,7 +35,6 @@ function maskNUP(digits) {
   );
 }
 
-/** Retorna true se houver 17 dígitos (NUP completo) */
 function isFullNUP(value) {
   return onlyDigits17(value).length === 17;
 }
@@ -57,7 +55,7 @@ async function getProcessoByNup(nup) {
   const { data, error } = await supabase
     .from("processos")
     .select("*")
-    .eq("nup", nup) // buscamos pelo NUP já mascarado
+    .eq("nup", nup)
     .maybeSingle();
   if (error) throw error;
   return data;
@@ -103,7 +101,7 @@ async function getHistorico(processoId) {
   return data;
 }
 
-// ========= Tabela (inalterada) =========
+// ========= Tabela (inalterada visualmente) =========
 
 function viewTabela(list) {
   return `
@@ -144,7 +142,7 @@ function viewTabela(list) {
   `;
 }
 
-// ========= Formulário =========
+// ========= Formulário (sem mudança visual além do já combinado) =========
 
 function viewFormulario() {
   return `
@@ -211,8 +209,15 @@ function bindTabela(container, refresh) {
     tr.querySelector(".btn-historico").addEventListener("click", async () => {
       try {
         const hist = await getHistorico(id);
+        // Exibe data, transição e autor (e-mail se disponível; senão UUID)
         alert(hist.length
-          ? hist.map(h => `${new Date(h.changed_at).toLocaleString()} • ${h.old_status ?? "(novo)"} → ${h.new_status}`).join("\n")
+          ? hist.map(h => {
+              const autor = h.changed_by_email || h.changed_by || "(desconhecido)";
+              const quando = new Date(h.changed_at).toLocaleString();
+              const de = h.old_status ?? "(criação)";
+              const para = h.new_status ?? "(sem status)";
+              return `${quando} • ${de} → ${para} • por: ${autor}`;
+            }).join("\n")
           : "Sem histórico.");
       } catch (e) {
         alert("Erro ao carregar histórico: " + e.message);
@@ -253,13 +258,12 @@ export default {
     let originalStatus = null;
     let pendingNup = "";
 
-    // === Máscara do NUP ===
+    // Máscara do NUP
     $nup.addEventListener("input", () => {
       const digits = onlyDigits17($nup.value);
       $nup.value = maskNUP(digits);
     });
 
-    // Reset padrão (aceita limpar também o NUP)
     function resetForm(clearNup = false) {
       $msg.textContent = "";
       if (clearNup) $nup.value = "";
@@ -284,7 +288,7 @@ export default {
       $entrada.disabled = false;
       $status.disabled = false;
       $salvar.disabled = false;
-      $excluir.disabled = true; // só em update
+      $excluir.disabled = true;
       currentAction = "create";
     }
 
@@ -349,7 +353,7 @@ export default {
         } else {
           perguntaCriar((decisao) => {
             if (decisao) setCreateMode(nupMasked);
-            else { resetForm(true); $nup.focus(); } // 'Não' limpa o NUP
+            else { resetForm(true); $nup.focus(); }
           });
         }
       } catch (e) {
@@ -357,14 +361,14 @@ export default {
       }
     });
 
-    // Limpar (NUP + reset)
+    // Limpar
     $limpar.addEventListener("click", () => {
       resetForm(true);
       $msg.textContent = "NUP limpo.";
       $nup.focus();
     });
 
-    // Salvar (update/create)
+    // Salvar
     $salvar.addEventListener("click", async () => {
       try {
         if (currentAction === "update") {
@@ -381,7 +385,7 @@ export default {
           if (!validarObrigatoriosParaCriar()) return;
 
           const payload = {
-            nup: pendingNup,                 // já no formato 00000.000000/0000-00
+            nup: pendingNup,                 // formato 00000.000000/0000-00
             tipo: $tipo.value,
             status: $status.value,
             entrada_regional: $entrada.value
@@ -400,7 +404,7 @@ export default {
       }
     });
 
-    // Excluir (somente quando em update)
+    // Excluir
     $excluir.addEventListener("click", async () => {
       if (currentAction !== "update" || !currentRowId) {
         alert("Busque um processo existente antes de excluir.");
