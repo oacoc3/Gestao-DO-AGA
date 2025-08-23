@@ -121,7 +121,7 @@ function calcularPrazosMapa(processos, historicos) {
   return prazos;
 }
 
-// ========= CSS do layout (duas metades, cabeçalhos fixos) =========
+// ========= CSS do módulo (layout, sticky headers, larguras 30%/70%) =========
 
 function ensureLayoutCSS() {
   if (document.getElementById("proc-two-pane-css")) return;
@@ -131,153 +131,70 @@ function ensureLayoutCSS() {
     /* Módulo ocupa a área útil visível; sem rolagem global */
     .proc-mod { display:flex; flex-direction:column; overflow:hidden; }
 
-    /* Formulário ocupa 100% da largura */
-    .proc-form-card { flex:0 0 auto; }
+    /* Formulário 100% largura e mais compacto (altura menor) */
+    .proc-form-card { flex:0 0 auto; padding-top:8px; padding-bottom:8px; }
     .proc-form-row { display:flex; align-items:flex-end; gap:8px; flex-wrap:nowrap; overflow:auto; }
     .proc-form-row > div { display:flex; flex-direction:column; }
+    .proc-form-row label { font-size:0.95rem; margin-bottom:2px; }
+    .proc-form-row input, .proc-form-row select, .proc-form-row button { height:34px; }
 
-    /* Área dividida em duas metades */
+    /* Área dividida em duas metades com proporções 30% (histórico) / 70% (lista) */
     .proc-split { display:flex; gap:10px; overflow:hidden; }
-    .proc-pane { flex:1 1 50%; min-width:0; display:flex; flex-direction:column; overflow:hidden; }
+    .proc-pane { min-width:0; display:flex; flex-direction:column; overflow:hidden; }
+    .hist-pane { flex:0 0 30%; }
+    .grid-pane { flex:1 1 70%; }
     .pane-title { margin:0 0 8px 0; }
     .pane-body { flex:1 1 auto; min-height:0; overflow:auto; }
 
-    /* Lista (direita) – tabela sem rolagem horizontal, cabeçalhos + filtros fixos */
+    /* Lista (direita) – rolagem vertical interna, cabeçalho fixo, sem filtros */
     .grid-pane .table { width:100%; table-layout:fixed; border-collapse:collapse; }
     .grid-pane th, .grid-pane td { font-size:12px; padding:4px 6px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .grid-pane select, .grid-pane input { font-size:12px; }
+    .grid-pane select { font-size:12px; }
     .grid-scroll { height:100%; overflow:auto; position:relative; }
-    .grid-scroll thead th { position:sticky; background:#fff; z-index:3; }
-    .grid-scroll thead tr.thead1 th { top:0; }
-    /* top da 2ª linha é ajustado via JS após medir a 1ª */
-    .grid-scroll thead tr.thead2 th { top: var(--thead1-h, 32px); }
+    .grid-scroll thead th { position:sticky; top:0; background:#fff; z-index:3; }
 
-    /* Histórico (esquerda) com cabeçalho fixo */
+    /* Histórico (esquerda) – cabeçalho fixo e rolagem vertical interna */
     .hist-pane .table { width:100%; table-layout:fixed; border-collapse:collapse; }
     .hist-pane th, .hist-pane td { font-size:12px; padding:4px 6px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .hist-scroll thead th { position:sticky; top:0; background:#fff; z-index:2; border-bottom:1px solid #ddd; }
 
     /* Linha selecionada na lista */
     .row-selected { outline:2px solid #999; }
-
-    /* Responsivo: tipografia ligeiramente mais compacta em telas estreitas */
-    @media (max-width: 900px) {
-      .grid-pane th, .grid-pane td, .hist-pane th, .hist-pane td { font-size:11px; padding:3px 4px; }
-    }
-    @media (max-width: 600px) {
-      .grid-pane th, .grid-pane td, .hist-pane th, .hist-pane td { font-size:10px; padding:2px 3px; }
-    }
   `;
   document.head.appendChild(style);
 }
 
-// Calcula a altura útil e fixa para que não haja rolagem na página
-function applyHeights(root) {
-  // trava rolagem global
-  document.documentElement.style.overflow = "hidden";
-  document.body.style.overflow = "hidden";
-
-  const mod = root.querySelector(".proc-mod");
-  const split = root.querySelector(".proc-split");
-
-  // altura disponível abaixo do topo do módulo
-  const top = mod.getBoundingClientRect().top;
-  const available = window.innerHeight - top - 12; // margem inferior leve
-  mod.style.height = available + "px";
-
-  // a altura das metades = espaço restante depois do formulário
-  const formH = root.querySelector(".proc-form-card").getBoundingClientRect().height;
-  split.style.height = (available - formH - 10) + "px";
-}
-
-// Ajusta a posição sticky da 2ª linha do thead conforme a altura real da 1ª
-function syncStickyOffsets(gridWrap) {
-  const scroll = gridWrap.querySelector(".grid-scroll");
-  if (!scroll) return;
-  const th1 = scroll.querySelector("thead tr.thead1");
-  const h = th1 ? th1.getBoundingClientRect().height : 32;
-  scroll.style.setProperty("--thead1-h", `${Math.round(h)}px`);
-}
-
-// ========= Helpers da lista =========
+// ========= Helpers de ordenação =========
 
 function arrowFor(col, sort) {
   if (sort.key !== col) return "";
   return sort.dir === "asc" ? " ▲" : " ▼";
 }
-const norm = (s) => (s || "").toString().toLowerCase();
-function parseYmd(s) {
-  if (!s) return null;
-  const d = new Date(s);
-  if (isNaN(d)) return null;
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
 
-// ========= Tabela com colgroup (larguras percentuais) =========
+// ========= Tabela (sem linha de filtros e sem coluna de “Histórico”) =========
 
-function viewTabela(listView, sort, filters, STATUS, TIPOS) {
+function viewTabela(listView, sort, STATUS) {
   const th = (key, label) => `<th data-sort-key="${key}" style="cursor:pointer">${label}${arrowFor(key, sort)}</th>`;
 
   return `
-    <div class="grid-controls">
-      <div style="font-weight:bold">Lista de processos</div>
-      <button id="flt-clear">Limpar filtros</button>
-    </div>
     <div class="grid-scroll">
       <table class="table">
         <colgroup>
-          <col style="width:14%">
-          <col style="width:10%">
           <col style="width:18%">
           <col style="width:12%">
-          <col style="width:12%">
+          <col style="width:20%">
           <col style="width:14%">
           <col style="width:14%">
-          <col style="width:6%">
+          <col style="width:22%">
         </colgroup>
         <thead>
-          <tr class="thead1">
+          <tr>
             ${th("nup","NUP")}
             ${th("tipo","Tipo")}
             ${th("status","Status")}
             ${th("entrada","1ª Entrada Regional")}
             ${th("prazo","Prazo Regional")}
-            ${th("modificado","Modificado por")}
             ${th("atualizado","Atualizado em")}
-            <th>Ações</th>
-          </tr>
-          <tr class="thead2">
-            <th><input id="flt-nup" placeholder="Filtrar..." value="${filters.nup ?? ""}" style="width:95%"></th>
-            <th>
-              <select id="flt-tipo" style="width:95%">
-                <option value="">Todos</option>
-                ${TIPOS.map(t => `<option ${filters.tipo===t?"selected":""}>${t}</option>`).join("")}
-              </select>
-            </th>
-            <th>
-              <select id="flt-status" style="width:95%">
-                <option value="">Todos</option>
-                ${STATUS.map(s => `<option ${filters.status===s?"selected":""}>${s}</option>`).join("")}
-              </select>
-            </th>
-            <th>
-              <div style="display:flex; gap:4px; justify-content:center">
-                <input id="flt-ent-from" type="date" value="${filters.entFrom ?? ""}">
-                <input id="flt-ent-to" type="date" value="${filters.entTo ?? ""}">
-              </div>
-            </th>
-            <th>
-              <label class="small"><input id="flt-prazo-sob" type="checkbox" ${filters.prazoSob?"checked":""}> Somente Sobrestado</label>
-            </th>
-            <th><input id="flt-mod" placeholder="Filtrar..." value="${filters.mod ?? ""}" style="width:95%"></th>
-            <th>
-              <div style="display:flex; gap:4px; justify-content:center">
-                <input id="flt-atl-from" type="date" value="${filters.atlFrom ?? ""}">
-                <input id="flt-atl-to" type="date" value="${filters.atlTo ?? ""}">
-              </div>
-            </th>
-            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -292,9 +209,7 @@ function viewTabela(listView, sort, filters, STATUS, TIPOS) {
               </td>
               <td>${v.entrada || ""}</td>
               <td>${v.prazoDisplay}</td>
-              <td class="small">${v.modificado || ""}</td>
               <td class="small">${v.atualizadoStr}</td>
-              <td><button class="btn-historico">Histórico</button></td>
             </tr>
           `).join("")}
         </tbody>
@@ -331,15 +246,14 @@ function viewHistorico(title, hist) {
   `;
 }
 
-// ========= Formulário =========
+// ========= Formulário (uma linha; sem título acima; rótulo alterado; sem botão Histórico) =========
 
 function viewFormulario() {
   return `
     <div class="card proc-form-card">
-      <h3>Insira o NUP do Processo</h3>
       <div class="proc-form-row">
         <div style="min-width:260px; flex:1 1 260px">
-          <label>NUP</label>
+          <label>Insira o NUP do Processo</label>
           <input id="f-nup" inputmode="numeric" autocomplete="off" placeholder="00000.000000/0000-00" />
         </div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-buscar">Buscar</button></div>
@@ -363,10 +277,9 @@ function viewFormulario() {
           </select>
         </div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-salvar" disabled>Salvar</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-historico-form" disabled>Histórico</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-excluir" disabled>Excluir</button></div>
       </div>
-      <div id="msg-novo" class="small" style="margin-top:8px"></div>
+      <div id="msg-novo" class="small" style="margin-top:6px"></div>
     </div>
   `;
 }
@@ -378,23 +291,15 @@ function bindTabela(container, refresh, onPickRow) {
     const id = tr.getAttribute("data-id");
     const nup = tr.getAttribute("data-nup");
     const select = tr.querySelector(".status-select");
-    const btnHist = tr.querySelector(".btn-historico");
 
+    // Alteração de status direto na lista
     select.addEventListener("change", async (ev) => {
       ev.stopPropagation();
       try { await updateStatus(id, select.value); await refresh(); }
       catch (e) { alert("Erro ao atualizar status: " + e.message); }
     });
 
-    btnHist.addEventListener("click", async (ev) => {
-      ev.stopPropagation();
-      try {
-        const hist = await getHistorico(id);
-        const pane = document.getElementById("hist-pane");
-        pane.innerHTML = viewHistorico(`Histórico — ${nup}`, hist);
-      } catch (e) { alert("Erro ao carregar histórico: " + e.message); }
-    });
-
+    // Clique na linha: seleciona processo no formulário + histórico
     tr.addEventListener("click", async () => {
       onPickRow(id);
       try {
@@ -441,11 +346,9 @@ export default {
     const $limpar = el("#btn-limpar");
     const $salvar = el("#btn-salvar");
     const $excluir = el("#btn-excluir");
-    const $histFrm = el("#btn-historico-form");
     const $msg = el("#msg-novo");
     const gridWrap = el("#grid");
     const histPane = el("#hist-pane");
-    const root = container;
 
     // Estado
     let currentAction = null;   // 'update' | 'create' | null
@@ -458,14 +361,7 @@ export default {
     let prazosMap = new Map();
     let viewData = [];
 
-    const filters = { nup:"", tipo:"", status:"", entFrom:"", entTo:"", prazoSob:false, mod:"", atlFrom:"", atlTo:"" };
     const sort = { key:"atualizado", dir:"desc" };
-
-    // Alturas sem rolagem global
-    const resizeAll = () => { applyHeights(root); syncStickyOffsets(gridWrap); };
-    window.addEventListener("resize", resizeAll);
-    // aplica inicialmente
-    setTimeout(resizeAll, 0);
 
     // NUP máscara
     $nup.addEventListener("input", () => { $nup.value = maskNUP(onlyDigits17($nup.value)); });
@@ -475,22 +371,22 @@ export default {
       if (clearNup) $nup.value = "";
       $tipo.value = ""; $entrada.value = ""; $status.value = "";
       $tipo.disabled = true; $entrada.disabled = true; $status.disabled = true;
-      $salvar.disabled = true; $excluir.disabled = true; $histFrm.disabled = true;
+      $salvar.disabled = true; $excluir.disabled = true;
       currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
     }
     function setCreateMode(nupMasked) {
       pendingNup = nupMasked; currentNupMasked = nupMasked;
       $msg.textContent = "Preencha os campos e clique em Salvar.";
       $tipo.disabled = false; $entrada.disabled = false; $status.disabled = false;
-      $salvar.disabled = false; $excluir.disabled = true; $histFrm.disabled = true;
+      $salvar.disabled = false; $excluir.disabled = true;
       histPane.innerHTML = viewHistorico("Histórico", []);
     }
     function setUpdateMode(row) {
       currentAction = "update"; currentRowId = row.id; originalStatus = row.status; currentNupMasked = row.nup;
       $tipo.value = row.tipo || ""; $entrada.value = row.entrada_regional || ""; $status.value = row.status || "";
       $tipo.disabled = true; $entrada.disabled = true; $status.disabled = false;
-      $salvar.disabled = true; $excluir.disabled = false; $histFrm.disabled = false;
-      $msg.textContent = "Processo encontrado. Altere o Status se necessário ou consulte o Histórico.";
+      $salvar.disabled = true; $excluir.disabled = false;
+      $msg.textContent = "Processo encontrado. Altere o Status se necessário ou veja o Histórico.";
     }
     function perguntaCriar(on) {
       $msg.innerHTML = `Processo não encontrado, gostaria de criar?
@@ -517,7 +413,6 @@ export default {
           id: r.id,
           nup: r.nup, tipo: r.tipo, status: r.status,
           entrada: r.entrada_regional || "",
-          modificado: r.modificado_por || "",
           atualizado: r.updated_at ? new Date(r.updated_at).getTime() : 0,
           atualizadoStr: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
           prazoDisplay: prazoStr,
@@ -526,17 +421,7 @@ export default {
         };
       });
     }
-    function applyFiltersSort() {
-      let arr = viewData.slice();
-      if (filters.nup) arr = arr.filter(v => norm(v.nup).includes(norm(filters.nup)));
-      if (filters.tipo) arr = arr.filter(v => v.tipo === filters.tipo);
-      if (filters.status) arr = arr.filter(v => v.status === filters.status);
-      if (filters.entFrom) { const t = parseYmd(filters.entFrom); arr = arr.filter(v => (v.entradaTS ?? 0) >= (t ?? 0)); }
-      if (filters.entTo) { const t = parseYmd(filters.entTo); arr = arr.filter(v => (v.entradaTS ?? 0) <= (t ? t + (24*60*60*1000 - 1) : Infinity)); }
-      if (filters.prazoSob) arr = arr.filter(v => v.prazoDisplay === "Sobrestado");
-      if (filters.mod) arr = arr.filter(v => norm(v.modificado).includes(norm(filters.mod)));
-      if (filters.atlFrom) { const t = parseYmd(filters.atlFrom); arr = arr.filter(v => v.atualizado >= (t ?? 0)); }
-      if (filters.atlTo) { const t = parseYmd(filters.atlTo); arr = arr.filter(v => v.atualizado <= (t ? t + (24*60*60*1000 - 1) : Infinity)); }
+    function applySort() {
       const key = sort.key, dir = sort.dir === "asc" ? 1 : -1;
       const val = (v) => {
         switch (key) {
@@ -545,16 +430,19 @@ export default {
           case "status": return v.status || "";
           case "entrada": return v.entradaTS ?? -Infinity;
           case "prazo": return (v.prazoDisplay === "Sobrestado") ? Number.POSITIVE_INFINITY : (v.prazoTS ?? Number.POSITIVE_INFINITY);
-          case "modificado": return v.modificado || "";
           case "atualizado": return v.atualizado ?? 0;
           default: return "";
         }
       };
+      const arr = viewData.slice();
       arr.sort((a,b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * dir);
       return arr;
     }
-    function attachFilterSortHandlers() {
-      const qs = (s) => gridWrap.querySelector(s);
+    function renderGrid() {
+      const view = applySort();
+      gridWrap.innerHTML = viewTabela(view, sort, STATUS);
+      bindTabela(gridWrap, refresh, onPickRowFromList);
+      // Ordenação por clique no cabeçalho
       gridWrap.querySelectorAll("th[data-sort-key]").forEach(th => {
         th.addEventListener("click", () => {
           const key = th.getAttribute("data-sort-key");
@@ -563,31 +451,6 @@ export default {
           renderGrid();
         });
       });
-      const bind = (id, prop, isChk=false) => {
-        const e = qs(id); if (!e) return;
-        e.addEventListener("input", () => { filters[prop] = isChk ? e.checked : e.value; renderGrid(); });
-      };
-      bind("#flt-nup","nup");
-      bind("#flt-tipo","tipo");
-      bind("#flt-status","status");
-      bind("#flt-ent-from","entFrom");
-      bind("#flt-ent-to","entTo");
-      bind("#flt-prazo-sob","prazoSob",true);
-      bind("#flt-mod","mod");
-      bind("#flt-atl-from","atlFrom");
-      bind("#flt-atl-to","atlTo");
-      const clear = qs("#flt-clear");
-      if (clear) clear.addEventListener("click", () => {
-        Object.assign(filters, { nup:"", tipo:"", status:"", entFrom:"", entTo:"", prazoSob:false, mod:"", atlFrom:"", atlTo:"" });
-        renderGrid();
-      });
-    }
-    function renderGrid() {
-      const view = applyFiltersSort();
-      gridWrap.innerHTML = viewTabela(view, sort, filters, STATUS, TIPOS);
-      bindTabela(gridWrap, refresh, onPickRowFromList);
-      attachFilterSortHandlers();
-      syncStickyOffsets(gridWrap);
       if (currentRowId) {
         const tr = gridWrap.querySelector(`tr[data-id="${currentRowId}"]`);
         if (tr) tr.classList.add("row-selected");
@@ -637,7 +500,7 @@ export default {
           const hist = await getHistorico(currentRowId);
           histPane.innerHTML = viewHistorico(`Histórico — ${currentNupMasked}`, hist);
         } else if (currentAction === "create") {
-          if (!$tipo.value || !$entrada.value || !$status.value) { alert("Preencha Tipo, 1ª Entrada e Status."); return; }
+          if (!validarObrigatoriosParaCriar()) return;
           const payload = { nup: pendingNup, tipo: $tipo.value, status: $status.value, entrada_regional: $entrada.value };
           const novo = await createProcesso(payload);
           $msg.textContent = "Processo criado com sucesso.";
@@ -658,13 +521,6 @@ export default {
         resetForm(true); histPane.innerHTML = viewHistorico("Histórico", []); await refresh(); $nup.focus();
       } catch (e) { alert("Erro ao excluir: " + e.message); }
     });
-    $histFrm.addEventListener("click", async () => {
-      if (currentAction !== "update" || !currentRowId) return;
-      try {
-        const hist = await getHistorico(currentRowId);
-        histPane.innerHTML = viewHistorico(`Histórico — ${currentNupMasked}`, hist);
-      } catch (e) { alert("Erro ao carregar histórico: " + e.message); }
-    });
 
     // Carregar lista
     const refresh = async () => {
@@ -676,7 +532,6 @@ export default {
         prazosMap = calcularPrazosMapa(allList, historicos);
         buildViewData();
         renderGrid();
-        resizeAll();
       } catch (e) {
         gridWrap.innerHTML = `<p>Erro ao carregar: ${e.message}</p>`;
       }
