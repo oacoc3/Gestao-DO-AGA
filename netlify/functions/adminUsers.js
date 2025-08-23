@@ -1,9 +1,14 @@
 // netlify/functions/adminUsers.js
+// Esta Function roda no servidor (Netlify) e usa a Service Role Key do Supabase.
+// Siglas:
+// - JWT: JSON Web Token (token com “claims” do usuário, incluindo app_metadata.perfil)
+// - RLS: Row Level Security (segurança em nível de linha, aplicada no banco)
+
 import { createClient } from '@supabase/supabase-js';
 
 const supaAdmin = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY, // service role
+  process.env.SUPABASE_SERVICE_ROLE_KEY, // <- Service Role (NUNCA expor no cliente)
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
@@ -15,11 +20,12 @@ function json(status, body) {
   };
 }
 
-// Valida o token do chamador e checa se é Admin
+// Valida token do chamador e exige perfil Administrador
 async function requireAdmin(event) {
   const auth = event.headers.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
   if (!token) throw { status: 401, message: 'Sem token' };
+
   const { data, error } = await supaAdmin.auth.getUser(token);
   if (error || !data?.user) throw { status: 401, message: 'Token inválido' };
 
@@ -31,12 +37,12 @@ async function requireAdmin(event) {
 
 export async function handler(event) {
   try {
-    const { user } = await requireAdmin(event);
+    await requireAdmin(event);
+
     const url = new URL(event.rawUrl);
-    const path = url.pathname; // e.g., /.netlify/functions/adminUsers
     const method = event.httpMethod;
 
-    // LISTAR perfis (pagina simples)
+    // LISTAR perfis (paginado simples)
     if (method === 'GET') {
       const page = Number(url.searchParams.get('page') || '1');
       const size = Number(url.searchParams.get('size') || '50');
@@ -57,28 +63,26 @@ export async function handler(event) {
       const body = JSON.parse(event.body || '{}');
       const {
         email,
-        password,                 // opcional se preferir link
+        password,                 // opcional: se não vier, geramos ou enviaremos reset
         perfil,                   // 'Administrador', 'CH AGA', ...
         posto_graduacao,
         nome_guerra,
         full_name
       } = body;
 
-      if (!email || (!password && !perfil)) {
-        return json(400, { error: 'email e perfil são obrigatórios; password opcional (pode usar link de recuperação).' });
-      }
+      if (!email || !perfil) return json(400, { error: 'email e perfil são obrigatórios' });
 
-      // Cria usuário no Auth com perfil no app_metadata
+      // Cria no Auth com perfil no app_metadata
       const { data: created, error: e1 } = await supaAdmin.auth.admin.createUser({
         email,
-        password: password || crypto.randomUUID(), // se não mandar senha, gera uma temporária
+        password: password || crypto.randomUUID(), // senha temporária se não informada
         email_confirm: true,
         user_metadata: { full_name, nome_guerra, posto_graduacao },
-        app_metadata: { perfil }                    // <- claim de perfil no JWT
+        app_metadata: { perfil }
       });
       if (e1) throw e1;
 
-      // Garante perfil no public.profiles
+      // Registra/atualiza em public.profiles
       const { error: e2 } = await supaAdmin
         .from('profiles')
         .upsert({
@@ -101,16 +105,14 @@ export async function handler(event) {
       const { id, email, perfil, posto_graduacao, nome_guerra, full_name } = body;
       if (!id) return json(400, { error: 'id é obrigatório' });
 
-      // Atualiza metadados no Auth (nome e perfil)
       const updates = {};
       if (email) updates.email = email;
       updates.user_metadata = { full_name, nome_guerra, posto_graduacao };
-      updates.app_metadata = { perfil };
+      if (perfil) updates.app_metadata = { perfil };
 
       const { error: e1 } = await supaAdmin.auth.admin.updateUserById(id, updates);
       if (e1) throw e1;
 
-      // Atualiza perfil na tabela
       const { error: e2 } = await supaAdmin
         .from('profiles')
         .update({ email, full_name, nome_guerra, posto_graduacao, perfil })
@@ -120,21 +122,19 @@ export async function handler(event) {
       return json(200, { ok: true });
     }
 
-    // RESETAR senha (envia link de recuperação)
-    if (method === 'POST' && event.queryStringParameters?.action === 'reset') {
+    // RESETAR senha (envia link de recuperação por e-mail)
+    if (method === 'POST' && (new URL(event.rawUrl)).searchParams.get('action') === 'reset') {
       const body = JSON.parse(event.body || '{}');
       const { email } = body;
       if (!email) return json(400, { error: 'email é obrigatório' });
 
-      // Gera link de recuperação (password reset)
       const { data: link, error: e1 } = await supaAdmin.auth.admin.generateLink({
         type: 'recovery',
         email
       });
       if (e1) throw e1;
 
-      // Você pode enviar o link por e-mail via seu SMTP aqui,
-      // ou simplesmente confiar no e-mail padrão do Supabase.
+      // O Supabase envia e-mail automaticamente (se SMTP configurado).
       return json(200, { ok: true, sent: true });
     }
 
@@ -147,7 +147,7 @@ export async function handler(event) {
       const { error: e1 } = await supaAdmin.auth.admin.deleteUser(id);
       if (e1) throw e1;
 
-      // limpeza do profile é cascata pelo FK
+      // O profile é removido automaticamente por ON DELETE CASCADE
       return json(200, { ok: true });
     }
 
