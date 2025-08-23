@@ -14,14 +14,11 @@ const STATUS = [
   "Publicação de Portaria", "Concluído", "Remoção/Rebaixamento", "Término de Obra"
 ];
 
-// ========= Utilitários: máscara/validação do NUP =========
+// ========= Utilitários: NUP =========
 
-/** Mantém apenas dígitos e limita a 17 algarismos */
 function onlyDigits17(value) {
   return (value || "").replace(/\D/g, "").slice(0, 17);
 }
-
-/** Aplica o formato 00000.000000/0000-00 sobre até 17 dígitos */
 function maskNUP(digits) {
   const d = onlyDigits17(digits);
   const len = d.length;
@@ -29,14 +26,9 @@ function maskNUP(digits) {
   if (len <= 5) return d;
   if (len <= 11) return d.slice(0, 5) + "." + d.slice(5);
   if (len <= 15) return d.slice(0, 5) + "." + d.slice(5, 11) + "/" + d.slice(11);
-  return (
-    d.slice(0, 5) + "." +
-    d.slice(5, 11) + "/" +
-    d.slice(11, 15) + "-" +
-    d.slice(15, 17)
-  );
+  return d.slice(0, 5) + "." + d.slice(5, 11) + "/" + d.slice(11, 15) + "-" + d.slice(15, 17);
 }
-function isFullNUP(value) { return onlyDigits17(value).length === 17; }
+const isFullNUP = (v) => onlyDigits17(v).length === 17;
 
 // ========= Acesso ao banco =========
 
@@ -49,7 +41,6 @@ async function listProcessos() {
   if (error) throw error;
   return data;
 }
-
 async function getProcessoByNup(nup) {
   const { data, error } = await supabase
     .from("processos")
@@ -59,7 +50,6 @@ async function getProcessoByNup(nup) {
   if (error) throw error;
   return data;
 }
-
 async function createProcesso(payload) {
   const { data, error } = await supabase
     .from("processos")
@@ -69,7 +59,6 @@ async function createProcesso(payload) {
   if (error) throw error;
   return data;
 }
-
 async function updateStatus(id, newStatus) {
   const { data, error } = await supabase
     .from("processos")
@@ -80,16 +69,11 @@ async function updateStatus(id, newStatus) {
   if (error) throw error;
   return data;
 }
-
 async function deleteProcesso(id) {
-  const { error } = await supabase
-    .from("processos")
-    .delete()
-    .eq("id", id);
+  const { error } = await supabase.from("processos").delete().eq("id", id);
   if (error) throw error;
   return true;
 }
-
 async function getHistorico(processoId) {
   const { data, error } = await supabase
     .from("status_history")
@@ -99,8 +83,6 @@ async function getHistorico(processoId) {
   if (error) throw error;
   return data;
 }
-
-/** Busca histórico de vários processos de uma vez (para calcular prazos) */
 async function getHistoricoBatch(ids) {
   if (!ids.length) return [];
   const { data, error } = await supabase
@@ -111,112 +93,119 @@ async function getHistoricoBatch(ids) {
   return data;
 }
 
-// ========= Cálculo do "Prazo Regional" (na SPA, não grava no banco) =========
+// ========= Cálculo do Prazo Regional (SPA) =========
 
 const SOBRESTADOS = new Set(["Sobrestado Técnico", "Sobrestado Documental"]);
 const DIA_MS = 24 * 60 * 60 * 1000;
 
-/**
- * Para cada processo, define a "data base" do prazo:
- * - por padrão: 1ª Entrada Regional
- * - se houve saída de Sobrestado (old_status ∈ SOBRESTADOS e new_status ∉ SOBRESTADOS),
- *   usa a data da ÚLTIMA saída como nova base.
- * O "Prazo Regional" = data base + 60 dias corridos.
- * Retorna um Map<processo_id, 'YYYY-MM-DD'> (string) ou '' se não puder calcular.
- */
 function calcularPrazosMapa(processos, historicos) {
-  const saidaSobMap = new Map(); // processo_id -> timestamp da última saída de Sobrestado
+  const saidaSobMap = new Map();
   for (const h of historicos) {
-    const saiuDeSob =
-      SOBRESTADOS.has(h.old_status) && !SOBRESTADOS.has(h.new_status);
+    const saiuDeSob = SOBRESTADOS.has(h.old_status) && !SOBRESTADOS.has(h.new_status);
     if (saiuDeSob) {
       const t = new Date(h.changed_at).getTime();
       const prev = saidaSobMap.get(h.processo_id);
       if (!prev || t > prev) saidaSobMap.set(h.processo_id, t);
     }
   }
-
   const prazos = new Map();
   for (const p of processos) {
-    let base = null;
-    if (p.entrada_regional) base = new Date(p.entrada_regional);
+    let base = p.entrada_regional ? new Date(p.entrada_regional) : null;
     const tSaida = saidaSobMap.get(p.id);
     if (tSaida) {
-      const dtSaida = new Date(tSaida);
-      if (!base || dtSaida > base) base = dtSaida;
+      const dt = new Date(tSaida);
+      if (!base || dt > base) base = dt;
     }
-    if (base) {
-      const prazo = new Date(base.getTime() + 60 * DIA_MS);
-      prazos.set(p.id, prazo.toISOString().slice(0, 10)); // YYYY-MM-DD
-    } else {
-      prazos.set(p.id, "");
-    }
+    prazos.set(p.id, base ? new Date(base.getTime() + 60 * DIA_MS).toISOString().slice(0, 10) : "");
   }
   return prazos;
 }
 
-// ========= CSS de layout responsivo em duas metades, cabeçalhos fixos =========
+// ========= CSS do layout (duas metades, cabeçalhos fixos) =========
 
 function ensureLayoutCSS() {
-  if (document.getElementById("spa-two-pane-css")) return;
+  if (document.getElementById("proc-two-pane-css")) return;
   const style = document.createElement("style");
-  style.id = "spa-two-pane-css";
+  style.id = "proc-two-pane-css";
   style.textContent = `
-    /* container do módulo ocupa a viewport inteira e não rola a página */
-    .proc-mod { height: 100vh; display:flex; flex-direction:column; overflow: hidden; }
+    /* Módulo ocupa a área útil visível; sem rolagem global */
+    .proc-mod { display:flex; flex-direction:column; overflow:hidden; }
 
-    /* formulário: ocupa toda a largura */
+    /* Formulário ocupa 100% da largura */
     .proc-form-card { flex:0 0 auto; }
     .proc-form-row { display:flex; align-items:flex-end; gap:8px; flex-wrap:nowrap; overflow:auto; }
     .proc-form-row > div { display:flex; flex-direction:column; }
 
-    /* faixa inferior em duas metades */
-    .proc-split { flex:1 1 auto; min-height:0; display:flex; gap:8px; overflow:hidden; }
+    /* Área dividida em duas metades */
+    .proc-split { display:flex; gap:10px; overflow:hidden; }
     .proc-pane { flex:1 1 50%; min-width:0; display:flex; flex-direction:column; overflow:hidden; }
-    .proc-pane .pane-title { margin:0 0 8px 0; }
-    .proc-pane .pane-body { flex:1 1 auto; min-height:0; overflow:auto; }
+    .pane-title { margin:0 0 8px 0; }
+    .pane-body { flex:1 1 auto; min-height:0; overflow:auto; }
 
-    /* grade (direita): sem rolagem horizontal, cabeçalho + filtros fixos, rolagem vertical interna */
-    .grid-pane .pane-body { overflow:auto; }
-    .grid-pane .table { width:100%; border-collapse:collapse; table-layout:fixed; }
+    /* Lista (direita) – tabela sem rolagem horizontal, cabeçalhos + filtros fixos */
+    .grid-pane .table { width:100%; table-layout:fixed; border-collapse:collapse; }
     .grid-pane th, .grid-pane td { font-size:12px; padding:4px 6px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .grid-pane select { font-size:12px; }
+    .grid-pane select, .grid-pane input { font-size:12px; }
     .grid-scroll { height:100%; overflow:auto; position:relative; }
-    .grid-scroll thead th { position: sticky; background:#fff; z-index:3; }
-    .grid-scroll thead tr:nth-child(1) th { top: 0; }
-    .grid-scroll thead tr:nth-child(2) th { top: 30px; } /* altura aproximada da 1ª linha */
-    .grid-scroll thead tr:nth-child(1) th, .grid-scroll thead tr:nth-child(2) th { border-bottom:1px solid #ddd; }
-    .grid-controls { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+    .grid-scroll thead th { position:sticky; background:#fff; z-index:3; }
+    .grid-scroll thead tr.thead1 th { top:0; }
+    /* top da 2ª linha é ajustado via JS após medir a 1ª */
+    .grid-scroll thead tr.thead2 th { top: var(--thead1-h, 32px); }
 
-    /* histórico (esquerda): tabela com cabeçalho fixo e rolagem vertical interna */
-    .hist-pane .table { width:100%; border-collapse:collapse; table-layout:fixed; }
+    /* Histórico (esquerda) com cabeçalho fixo */
+    .hist-pane .table { width:100%; table-layout:fixed; border-collapse:collapse; }
     .hist-pane th, .hist-pane td { font-size:12px; padding:4px 6px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .hist-scroll { height:100%; overflow:auto; position:relative; }
     .hist-scroll thead th { position:sticky; top:0; background:#fff; z-index:2; border-bottom:1px solid #ddd; }
 
-    /* responsividade: em telas bem estreitas, mantém metades lado a lado mas com tipografia ainda mais compacta */
+    /* Linha selecionada na lista */
+    .row-selected { outline:2px solid #999; }
+
+    /* Responsivo: tipografia ligeiramente mais compacta em telas estreitas */
     @media (max-width: 900px) {
       .grid-pane th, .grid-pane td, .hist-pane th, .hist-pane td { font-size:11px; padding:3px 4px; }
-      .grid-scroll thead tr:nth-child(2) th { top: 28px; }
     }
     @media (max-width: 600px) {
       .grid-pane th, .grid-pane td, .hist-pane th, .hist-pane td { font-size:10px; padding:2px 3px; }
-      .grid-scroll thead tr:nth-child(2) th { top: 26px; }
     }
-
-    /* destaque da linha selecionada na lista */
-    .row-selected { outline: 2px solid #999; }
   `;
   document.head.appendChild(style);
 }
 
-// ========= UI helpers (setinhas de ordenação, normalização etc.) =========
+// Calcula a altura útil e fixa para que não haja rolagem na página
+function applyHeights(root) {
+  // trava rolagem global
+  document.documentElement.style.overflow = "hidden";
+  document.body.style.overflow = "hidden";
+
+  const mod = root.querySelector(".proc-mod");
+  const split = root.querySelector(".proc-split");
+
+  // altura disponível abaixo do topo do módulo
+  const top = mod.getBoundingClientRect().top;
+  const available = window.innerHeight - top - 12; // margem inferior leve
+  mod.style.height = available + "px";
+
+  // a altura das metades = espaço restante depois do formulário
+  const formH = root.querySelector(".proc-form-card").getBoundingClientRect().height;
+  split.style.height = (available - formH - 10) + "px";
+}
+
+// Ajusta a posição sticky da 2ª linha do thead conforme a altura real da 1ª
+function syncStickyOffsets(gridWrap) {
+  const scroll = gridWrap.querySelector(".grid-scroll");
+  if (!scroll) return;
+  const th1 = scroll.querySelector("thead tr.thead1");
+  const h = th1 ? th1.getBoundingClientRect().height : 32;
+  scroll.style.setProperty("--thead1-h", `${Math.round(h)}px`);
+}
+
+// ========= Helpers da lista =========
 
 function arrowFor(col, sort) {
   if (sort.key !== col) return "";
   return sort.dir === "asc" ? " ▲" : " ▼";
 }
-function norm(str) { return (str || "").toString().toLowerCase(); }
+const norm = (s) => (s || "").toString().toLowerCase();
 function parseYmd(s) {
   if (!s) return null;
   const d = new Date(s);
@@ -225,11 +214,10 @@ function parseYmd(s) {
   return d.getTime();
 }
 
-// ========= Render da tabela da lista (cabeçalho + filtros fixos) =========
+// ========= Tabela com colgroup (larguras percentuais) =========
 
 function viewTabela(listView, sort, filters, STATUS, TIPOS) {
-  const th = (key, label) =>
-    `<th data-sort-key="${key}" style="cursor:pointer">${label}${arrowFor(key, sort)}</th>`;
+  const th = (key, label) => `<th data-sort-key="${key}" style="cursor:pointer">${label}${arrowFor(key, sort)}</th>`;
 
   return `
     <div class="grid-controls">
@@ -238,6 +226,16 @@ function viewTabela(listView, sort, filters, STATUS, TIPOS) {
     </div>
     <div class="grid-scroll">
       <table class="table">
+        <colgroup>
+          <col style="width:14%">
+          <col style="width:10%">
+          <col style="width:18%">
+          <col style="width:12%">
+          <col style="width:12%">
+          <col style="width:14%">
+          <col style="width:14%">
+          <col style="width:6%">
+        </colgroup>
         <thead>
           <tr class="thead1">
             ${th("nup","NUP")}
@@ -250,9 +248,7 @@ function viewTabela(listView, sort, filters, STATUS, TIPOS) {
             <th>Ações</th>
           </tr>
           <tr class="thead2">
-            <th>
-              <input id="flt-nup" placeholder="Filtrar..." value="${filters.nup ?? ""}" style="width:95%">
-            </th>
+            <th><input id="flt-nup" placeholder="Filtrar..." value="${filters.nup ?? ""}" style="width:95%"></th>
             <th>
               <select id="flt-tipo" style="width:95%">
                 <option value="">Todos</option>
@@ -274,9 +270,7 @@ function viewTabela(listView, sort, filters, STATUS, TIPOS) {
             <th>
               <label class="small"><input id="flt-prazo-sob" type="checkbox" ${filters.prazoSob?"checked":""}> Somente Sobrestado</label>
             </th>
-            <th>
-              <input id="flt-mod" placeholder="Filtrar..." value="${filters.mod ?? ""}" style="width:95%">
-            </th>
+            <th><input id="flt-mod" placeholder="Filtrar..." value="${filters.mod ?? ""}" style="width:95%"></th>
             <th>
               <div style="display:flex; gap:4px; justify-content:center">
                 <input id="flt-atl-from" type="date" value="${filters.atlFrom ?? ""}">
@@ -293,7 +287,7 @@ function viewTabela(listView, sort, filters, STATUS, TIPOS) {
               <td>${v.tipo}</td>
               <td>
                 <select class="status-select">
-                  ${STATUS.map(s => `<option ${s === v.status ? "selected" : ""}>${s}</option>`).join("")}
+                  ${STATUS.map(s => `<option ${s===v.status?"selected":""}>${s}</option>`).join("")}
                 </select>
               </td>
               <td>${v.entrada || ""}</td>
@@ -309,7 +303,7 @@ function viewTabela(listView, sort, filters, STATUS, TIPOS) {
   `;
 }
 
-// ========= Render do painel de Histórico (tabela fixa) =========
+// ========= Painel do Histórico =========
 
 function viewHistorico(title, hist) {
   const rows = (hist || []).map(h => {
@@ -317,24 +311,17 @@ function viewHistorico(title, hist) {
     const quando = new Date(h.changed_at).toLocaleString();
     const de = h.old_status ?? "(criação)";
     const para = h.new_status ?? "(sem status)";
-    return `<tr>
-      <td>${quando}</td>
-      <td>${de}</td>
-      <td>${para}</td>
-      <td>${autor}</td>
-    </tr>`;
+    return `<tr><td>${quando}</td><td>${de}</td><td>${para}</td><td>${autor}</td></tr>`;
   }).join("");
   return `
     <h3 class="pane-title">${title}</h3>
-    <div class="hist-scroll pane-body">
+    <div class="pane-body hist-scroll">
       <table class="table">
+        <colgroup>
+          <col style="width:34%"><col style="width:22%"><col style="width:22%"><col style="width:22%">
+        </colgroup>
         <thead>
-          <tr>
-            <th>Data/Hora</th>
-            <th>De</th>
-            <th>Para</th>
-            <th>Por</th>
-          </tr>
+          <tr><th>Data/Hora</th><th>De</th><th>Para</th><th>Por</th></tr>
         </thead>
         <tbody>
           ${rows || `<tr><td colspan="4">Sem histórico.</td></tr>`}
@@ -344,32 +331,19 @@ function viewHistorico(title, hist) {
   `;
 }
 
-// ========= Formulário (uma linha; ocupa 100%) =========
+// ========= Formulário =========
 
 function viewFormulario() {
   return `
     <div class="card proc-form-card">
       <h3>Insira o NUP do Processo</h3>
       <div class="proc-form-row">
-        <!-- NUP -->
         <div style="min-width:260px; flex:1 1 260px">
           <label>NUP</label>
           <input id="f-nup" inputmode="numeric" autocomplete="off" placeholder="00000.000000/0000-00" />
         </div>
-
-        <!-- Buscar -->
-        <div style="flex:0 0 auto">
-          <label>&nbsp;</label>
-          <button id="btn-buscar">Buscar</button>
-        </div>
-
-        <!-- Limpar -->
-        <div style="flex:0 0 auto">
-          <label>&nbsp;</label>
-          <button id="btn-limpar" type="button">Limpar</button>
-        </div>
-
-        <!-- Tipo -->
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-buscar">Buscar</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-limpar" type="button">Limpar</button></div>
         <div style="min-width:180px; flex:1 1 180px">
           <label>Tipo</label>
           <select id="f-tipo" disabled>
@@ -377,14 +351,10 @@ function viewFormulario() {
             ${TIPOS.map(t => `<option value="${t}">${t}</option>`).join("")}
           </select>
         </div>
-
-        <!-- 1ª Entrada Regional -->
         <div style="min-width:160px; flex:1 1 160px">
           <label>1ª Entrada Regional</label>
           <input id="f-entrada" type="date" disabled />
         </div>
-
-        <!-- Status -->
         <div style="min-width:200px; flex:1 1 200px">
           <label>Status</label>
           <select id="f-status" disabled>
@@ -392,32 +362,16 @@ function viewFormulario() {
             ${STATUS.map(s => `<option value="${s}">${s}</option>`).join("")}
           </select>
         </div>
-
-        <!-- Salvar -->
-        <div style="flex:0 0 auto">
-          <label>&nbsp;</label>
-          <button id="btn-salvar" disabled>Salvar</button>
-        </div>
-
-        <!-- Histórico -->
-        <div style="flex:0 0 auto">
-          <label>&nbsp;</label>
-          <button id="btn-historico-form" disabled>Histórico</button>
-        </div>
-
-        <!-- Excluir -->
-        <div style="flex:0 0 auto">
-          <label>&nbsp;</label>
-          <button id="btn-excluir" disabled>Excluir</button>
-        </div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-salvar" disabled>Salvar</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-historico-form" disabled>Histórico</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-excluir" disabled>Excluir</button></div>
       </div>
-
       <div id="msg-novo" class="small" style="margin-top:8px"></div>
     </div>
   `;
 }
 
-// ========= Comportamento: bind da lista (inclui click da linha) =========
+// ========= Bind da tabela =========
 
 function bindTabela(container, refresh, onPickRow) {
   container.querySelectorAll("tr[data-id]").forEach(tr => {
@@ -426,44 +380,30 @@ function bindTabela(container, refresh, onPickRow) {
     const select = tr.querySelector(".status-select");
     const btnHist = tr.querySelector(".btn-historico");
 
-    // Alteração de status direto na lista
     select.addEventListener("change", async (ev) => {
       ev.stopPropagation();
-      const newStatus = select.value;
-      try {
-        await updateStatus(id, newStatus);
-        await refresh();
-      } catch (e) {
-        alert("Erro ao atualizar status: " + e.message);
-      }
+      try { await updateStatus(id, select.value); await refresh(); }
+      catch (e) { alert("Erro ao atualizar status: " + e.message); }
     });
 
-    // Botão Histórico: mostra no painel da esquerda
     btnHist.addEventListener("click", async (ev) => {
       ev.stopPropagation();
       try {
         const hist = await getHistorico(id);
-        const histPane = document.getElementById("hist-pane");
-        histPane.innerHTML = viewHistorico(`Histórico — ${nup}`, hist);
-      } catch (e) {
-        alert("Erro ao carregar histórico: " + e.message);
-      }
+        const pane = document.getElementById("hist-pane");
+        pane.innerHTML = viewHistorico(`Histórico — ${nup}`, hist);
+      } catch (e) { alert("Erro ao carregar histórico: " + e.message); }
     });
 
-    // Clique na linha: seleciona processo no formulário + histórico
     tr.addEventListener("click", async () => {
-      onPickRow(id); // define no formulário
+      onPickRow(id);
       try {
-        // destacar linha selecionada
-        container.querySelectorAll("tbody tr").forEach(row => row.classList.remove("row-selected"));
+        container.querySelectorAll("tbody tr").forEach(r => r.classList.remove("row-selected"));
         tr.classList.add("row-selected");
-
         const hist = await getHistorico(id);
-        const histPane = document.getElementById("hist-pane");
-        histPane.innerHTML = viewHistorico(`Histórico — ${nup}`, hist);
-      } catch (e) {
-        alert("Erro ao carregar histórico: " + e.message);
-      }
+        const pane = document.getElementById("hist-pane");
+        pane.innerHTML = viewHistorico(`Histórico — ${nup}`, hist);
+      } catch (e) { alert("Erro ao carregar histórico: " + e.message); }
     });
   });
 }
@@ -475,22 +415,14 @@ export default {
   title: "Processos",
   route: "#/processos",
   async view(container) {
-    // aplica CSS de layout
     ensureLayoutCSS();
 
-    // Layout base do módulo: formulário em cima; duas metades abaixo
     container.innerHTML = `
       <div class="container proc-mod">
         ${viewFormulario()}
         <div class="proc-split">
           <div class="card proc-pane hist-pane" id="hist-pane">
-            <h3 class="pane-title">Histórico</h3>
-            <div class="pane-body hist-scroll">
-              <table class="table">
-                <thead><tr><th>Data/Hora</th><th>De</th><th>Para</th><th>Por</th></tr></thead>
-                <tbody><tr><td colspan="4">Selecione um processo para ver o histórico.</td></tr></tbody>
-              </table>
-            </div>
+            ${viewHistorico("Histórico", [])}
           </div>
           <div class="card proc-pane grid-pane" id="grid-pane">
             <div id="grid">Carregando...</div>
@@ -499,172 +431,112 @@ export default {
       </div>
     `;
 
-    // ------------ refs ------------
-    const el = (sel) => container.querySelector(sel);
-    const $nup     = el("#f-nup");
-    const $tipo    = el("#f-tipo");
+    // Refs
+    const el = (s) => container.querySelector(s);
+    const $nup = el("#f-nup");
+    const $tipo = el("#f-tipo");
     const $entrada = el("#f-entrada");
-    const $status  = el("#f-status");
-    const $buscar  = el("#btn-buscar");
-    const $limpar  = el("#btn-limpar");
-    const $salvar  = el("#btn-salvar");
+    const $status = el("#f-status");
+    const $buscar = el("#btn-buscar");
+    const $limpar = el("#btn-limpar");
+    const $salvar = el("#btn-salvar");
     const $excluir = el("#btn-excluir");
     const $histFrm = el("#btn-historico-form");
-    const $msg     = el("#msg-novo");
+    const $msg = el("#msg-novo");
     const gridWrap = el("#grid");
     const histPane = el("#hist-pane");
+    const root = container;
 
-    // ------------ estado ------------
+    // Estado
     let currentAction = null;   // 'update' | 'create' | null
     let currentRowId = null;
     let originalStatus = null;
     let pendingNup = "";
     let currentNupMasked = "";
 
-    let allList = [];          // dados crus
-    let prazosMap = new Map(); // id -> "YYYY-MM-DD"
-    let viewData = [];         // dados de visualização
+    let allList = [];
+    let prazosMap = new Map();
+    let viewData = [];
 
-    const filters = {
-      nup: "", tipo: "", status: "",
-      entFrom: "", entTo: "",
-      prazoSob: false,
-      mod: "", atlFrom: "", atlTo: ""
-    };
-    const sort = { key: "atualizado", dir: "desc" }; // padrão: mais recente primeiro
+    const filters = { nup:"", tipo:"", status:"", entFrom:"", entTo:"", prazoSob:false, mod:"", atlFrom:"", atlTo:"" };
+    const sort = { key:"atualizado", dir:"desc" };
 
-    // ------------ helpers do form ------------
-    $nup.addEventListener("input", () => {
-      const digits = onlyDigits17($nup.value);
-      $nup.value = maskNUP(digits);
-    });
+    // Alturas sem rolagem global
+    const resizeAll = () => { applyHeights(root); syncStickyOffsets(gridWrap); };
+    window.addEventListener("resize", resizeAll);
+    // aplica inicialmente
+    setTimeout(resizeAll, 0);
 
-    function resetForm(clearNup = false) {
+    // NUP máscara
+    $nup.addEventListener("input", () => { $nup.value = maskNUP(onlyDigits17($nup.value)); });
+
+    function resetForm(clearNup=false) {
       $msg.textContent = "";
       if (clearNup) $nup.value = "";
-      $tipo.value = "";
-      $entrada.value = "";
-      $status.value = "";
-      $tipo.disabled = true;
-      $entrada.disabled = true;
-      $status.disabled = true;
-      $salvar.disabled = true;
-      $excluir.disabled = true;
-      $histFrm.disabled = true;
-      currentAction = null;
-      currentRowId = null;
-      originalStatus = null;
-      pendingNup = "";
-      currentNupMasked = "";
+      $tipo.value = ""; $entrada.value = ""; $status.value = "";
+      $tipo.disabled = true; $entrada.disabled = true; $status.disabled = true;
+      $salvar.disabled = true; $excluir.disabled = true; $histFrm.disabled = true;
+      currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
     }
-
     function setCreateMode(nupMasked) {
-      pendingNup = nupMasked;
-      currentNupMasked = nupMasked;
+      pendingNup = nupMasked; currentNupMasked = nupMasked;
       $msg.textContent = "Preencha os campos e clique em Salvar.";
-      $tipo.disabled = false;
-      $entrada.disabled = false;
-      $status.disabled = false;
-      $salvar.disabled = false;
-      $excluir.disabled = true;
-      $histFrm.disabled = true;
-      currentAction = "create";
-      // limpa histórico
+      $tipo.disabled = false; $entrada.disabled = false; $status.disabled = false;
+      $salvar.disabled = false; $excluir.disabled = true; $histFrm.disabled = true;
       histPane.innerHTML = viewHistorico("Histórico", []);
     }
-
     function setUpdateMode(row) {
-      currentAction = "update";
-      currentRowId = row.id;
-      originalStatus = row.status;
-      currentNupMasked = row.nup;
-
-      $tipo.value = row.tipo || "";
-      $entrada.value = row.entrada_regional || "";
-      $status.value = row.status || "";
-
-      $tipo.disabled = true;
-      $entrada.disabled = true;
-      $status.disabled = false;
-
-      $salvar.disabled = true;
-      $excluir.disabled = false;
-      $histFrm.disabled = false;
+      currentAction = "update"; currentRowId = row.id; originalStatus = row.status; currentNupMasked = row.nup;
+      $tipo.value = row.tipo || ""; $entrada.value = row.entrada_regional || ""; $status.value = row.status || "";
+      $tipo.disabled = true; $entrada.disabled = true; $status.disabled = false;
+      $salvar.disabled = true; $excluir.disabled = false; $histFrm.disabled = false;
       $msg.textContent = "Processo encontrado. Altere o Status se necessário ou consulte o Histórico.";
     }
-
-    function perguntaCriar(onDecide) {
-      $msg.innerHTML = `
-        Processo não encontrado, gostaria de criar?
+    function perguntaCriar(on) {
+      $msg.innerHTML = `Processo não encontrado, gostaria de criar?
         <button id="btn-sim" style="margin-left:8px">Sim</button>
-        <button id="btn-nao" style="margin-left:4px">Não</button>
-      `;
-      el("#btn-sim").onclick = () => onDecide(true);
-      el("#btn-nao").onclick = () => onDecide(false);
+        <button id="btn-nao" style="margin-left:4px">Não</button>`;
+      el("#btn-sim").onclick = () => on(true);
+      el("#btn-nao").onclick = () => on(false);
     }
-
     function validarObrigatoriosParaCriar() {
       if (!$tipo.value) { alert("Selecione o Tipo."); return false; }
       if (!$entrada.value) { alert("Informe a 1ª Entrada Regional."); return false; }
       if (!$status.value) { alert("Selecione o Status."); return false; }
       return true;
     }
-
     $status.addEventListener("change", () => {
-      if (currentAction === "update") {
-        $salvar.disabled = ($status.value === originalStatus || !$status.value);
-      }
+      if (currentAction === "update") $salvar.disabled = ($status.value === originalStatus || !$status.value);
     });
 
-    // ------------ montagem dos dados de visualização ------------
+    // ViewData
     function buildViewData() {
       viewData = allList.map(r => {
         const prazoStr = SOBRESTADOS.has(r.status) ? "Sobrestado" : (prazosMap.get(r.id) || "");
-        const prazoTS = prazoStr && prazoStr !== "Sobrestado" ? new Date(prazoStr).getTime() : null;
-        const entradaTS = r.entrada_regional ? new Date(r.entrada_regional).getTime() : null;
-        const atualizadoTS = r.updated_at ? new Date(r.updated_at).getTime() : 0;
         return {
           id: r.id,
-          nup: r.nup,
-          tipo: r.tipo,
-          status: r.status,
+          nup: r.nup, tipo: r.tipo, status: r.status,
           entrada: r.entrada_regional || "",
           modificado: r.modificado_por || "",
-          atualizado: atualizadoTS,
+          atualizado: r.updated_at ? new Date(r.updated_at).getTime() : 0,
           atualizadoStr: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
           prazoDisplay: prazoStr,
-          prazoTS, entradaTS
+          prazoTS: prazoStr && prazoStr !== "Sobrestado" ? new Date(prazoStr).getTime() : null,
+          entradaTS: r.entrada_regional ? new Date(r.entrada_regional).getTime() : null
         };
       });
     }
-
     function applyFiltersSort() {
       let arr = viewData.slice();
-
-      // Filtros
       if (filters.nup) arr = arr.filter(v => norm(v.nup).includes(norm(filters.nup)));
       if (filters.tipo) arr = arr.filter(v => v.tipo === filters.tipo);
       if (filters.status) arr = arr.filter(v => v.status === filters.status);
-      if (filters.entFrom) {
-        const t = parseYmd(filters.entFrom);
-        arr = arr.filter(v => (v.entradaTS ?? 0) >= (t ?? 0));
-      }
-      if (filters.entTo) {
-        const t = parseYmd(filters.entTo);
-        arr = arr.filter(v => (v.entradaTS ?? 0) <= (t ? t + (24*60*60*1000 - 1) : Infinity));
-      }
+      if (filters.entFrom) { const t = parseYmd(filters.entFrom); arr = arr.filter(v => (v.entradaTS ?? 0) >= (t ?? 0)); }
+      if (filters.entTo) { const t = parseYmd(filters.entTo); arr = arr.filter(v => (v.entradaTS ?? 0) <= (t ? t + (24*60*60*1000 - 1) : Infinity)); }
       if (filters.prazoSob) arr = arr.filter(v => v.prazoDisplay === "Sobrestado");
       if (filters.mod) arr = arr.filter(v => norm(v.modificado).includes(norm(filters.mod)));
-      if (filters.atlFrom) {
-        const t = parseYmd(filters.atlFrom);
-        arr = arr.filter(v => v.atualizado >= (t ?? 0));
-      }
-      if (filters.atlTo) {
-        const t = parseYmd(filters.atlTo);
-        arr = arr.filter(v => v.atualizado <= (t ? t + (24*60*60*1000 - 1) : Infinity));
-      }
-
-      // Ordenação
+      if (filters.atlFrom) { const t = parseYmd(filters.atlFrom); arr = arr.filter(v => v.atualizado >= (t ?? 0)); }
+      if (filters.atlTo) { const t = parseYmd(filters.atlTo); arr = arr.filter(v => v.atualizado <= (t ? t + (24*60*60*1000 - 1) : Infinity)); }
       const key = sort.key, dir = sort.dir === "asc" ? 1 : -1;
       const val = (v) => {
         switch (key) {
@@ -678,204 +550,123 @@ export default {
           default: return "";
         }
       };
-      arr.sort((a, b) => {
-        const va = val(a), vb = val(b);
-        if (va === vb) return 0;
-        return (va > vb ? 1 : -1) * dir;
-      });
-
+      arr.sort((a,b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * dir);
       return arr;
     }
-
     function attachFilterSortHandlers() {
       const qs = (s) => gridWrap.querySelector(s);
-
-      // Ordenação por clique no cabeçalho
       gridWrap.querySelectorAll("th[data-sort-key]").forEach(th => {
         th.addEventListener("click", () => {
           const key = th.getAttribute("data-sort-key");
-          if (sort.key === key) {
-            sort.dir = sort.dir === "asc" ? "desc" : "asc";
-          } else {
-            sort.key = key;
-            sort.dir = "asc";
-          }
+          if (sort.key === key) sort.dir = sort.dir === "asc" ? "desc" : "asc";
+          else { sort.key = key; sort.dir = "asc"; }
           renderGrid();
         });
       });
-
-      // Filtros
-      const bind = (id, prop, isCheckbox = false) => {
-        const el = qs(id);
-        if (!el) return;
-        el.addEventListener("input", () => {
-          filters[prop] = isCheckbox ? el.checked : el.value;
-          renderGrid();
-        });
+      const bind = (id, prop, isChk=false) => {
+        const e = qs(id); if (!e) return;
+        e.addEventListener("input", () => { filters[prop] = isChk ? e.checked : e.value; renderGrid(); });
       };
-      bind("#flt-nup", "nup");
-      bind("#flt-tipo", "tipo");
-      bind("#flt-status", "status");
-      bind("#flt-ent-from", "entFrom");
-      bind("#flt-ent-to", "entTo");
-      bind("#flt-prazo-sob", "prazoSob", true);
-      bind("#flt-mod", "mod");
-      bind("#flt-atl-from", "atlFrom");
-      bind("#flt-atl-to", "atlTo");
-
+      bind("#flt-nup","nup");
+      bind("#flt-tipo","tipo");
+      bind("#flt-status","status");
+      bind("#flt-ent-from","entFrom");
+      bind("#flt-ent-to","entTo");
+      bind("#flt-prazo-sob","prazoSob",true);
+      bind("#flt-mod","mod");
+      bind("#flt-atl-from","atlFrom");
+      bind("#flt-atl-to","atlTo");
       const clear = qs("#flt-clear");
-      if (clear) {
-        clear.addEventListener("click", () => {
-          Object.assign(filters, { nup:"", tipo:"", status:"", entFrom:"", entTo:"", prazoSob:false, mod:"", atlFrom:"", atlTo:"" });
-          renderGrid();
-        });
-      }
+      if (clear) clear.addEventListener("click", () => {
+        Object.assign(filters, { nup:"", tipo:"", status:"", entFrom:"", entTo:"", prazoSob:false, mod:"", atlFrom:"", atlTo:"" });
+        renderGrid();
+      });
     }
-
-    // ------------ render da grade à direita ------------
     function renderGrid() {
-      const listView = applyFiltersSort();
-      gridWrap.innerHTML = viewTabela(listView, sort, filters, STATUS, TIPOS);
+      const view = applyFiltersSort();
+      gridWrap.innerHTML = viewTabela(view, sort, filters, STATUS, TIPOS);
       bindTabela(gridWrap, refresh, onPickRowFromList);
       attachFilterSortHandlers();
-
-      // Reaplica destaque na linha atualmente selecionada (se houver)
+      syncStickyOffsets(gridWrap);
       if (currentRowId) {
         const tr = gridWrap.querySelector(`tr[data-id="${currentRowId}"]`);
         if (tr) tr.classList.add("row-selected");
       }
     }
-
-    // ------------ preencher formulário a partir do clique na lista ------------
     function onPickRowFromList(id) {
       const row = allList.find(r => String(r.id) === String(id));
       if (!row) return;
       setUpdateMode(row);
-      $nup.value = row.nup; // mantém NUP visível coerente ao selecionar pela lista
+      $nup.value = row.nup;
+      currentRowId = row.id;
     }
 
-    // ------------ fluxo do formulário ------------
+    // Formulário
     $buscar.addEventListener("click", async () => {
-      const digits = onlyDigits17($nup.value);
-      if (digits.length !== 17) {
-        $msg.textContent = "Informe um NUP completo (17 dígitos).";
-        $nup.focus();
-        return;
+      if (!isFullNUP($nup.value)) {
+        $msg.textContent = "Informe um NUP completo (17 dígitos)."; $nup.focus(); return;
       }
-      const nupMasked = maskNUP(digits);
-
-      // mantém NUP visível durante a busca
+      const nupMasked = maskNUP(onlyDigits17($nup.value));
       $msg.textContent = "Buscando...";
-
       try {
         const row = await getProcessoByNup(nupMasked);
         if (row) {
-          setUpdateMode(row);
-
-          // destaca na lista e carrega histórico à esquerda
-          currentRowId = row.id;
-          renderGrid(); // para destacar a linha
+          setUpdateMode(row); currentRowId = row.id;
+          renderGrid(); // destaca linha
           const hist = await getHistorico(row.id);
           histPane.innerHTML = viewHistorico(`Histórico — ${row.nup}`, hist);
         } else {
-          // pergunta: criar?
           perguntaCriar((decisao) => {
-            if (decisao) {
-              setCreateMode(nupMasked);
-            } else {
-              resetForm(true);
-              histPane.innerHTML = viewHistorico("Histórico", []);
-              $nup.focus();
-            }
+            if (decisao) setCreateMode(nupMasked);
+            else { resetForm(true); histPane.innerHTML = viewHistorico("Histórico", []); $nup.focus(); }
           });
         }
-      } catch (e) {
-        $msg.textContent = "Erro ao buscar: " + e.message;
-      }
+      } catch (e) { $msg.textContent = "Erro ao buscar: " + e.message; }
     });
-
     $limpar.addEventListener("click", () => {
-      resetForm(true);
-      histPane.innerHTML = viewHistorico("Histórico", []);
-      $msg.textContent = "NUP limpo.";
-      $nup.focus();
+      resetForm(true); histPane.innerHTML = viewHistorico("Histórico", []); $msg.textContent = "NUP limpo."; $nup.focus();
     });
-
     $salvar.addEventListener("click", async () => {
       try {
         if (currentAction === "update") {
-          if ($status.value === originalStatus || !$status.value) {
-            alert("Altere o Status para salvar.");
-            return;
-          }
+          if ($status.value === originalStatus || !$status.value) { alert("Altere o Status para salvar."); return; }
           await updateStatus(currentRowId, $status.value);
           $msg.textContent = "Status atualizado com sucesso.";
-          originalStatus = $status.value;
-          $salvar.disabled = true;
+          originalStatus = $status.value; $salvar.disabled = true;
           await refresh();
-          // atualiza histórico visível
           const hist = await getHistorico(currentRowId);
           histPane.innerHTML = viewHistorico(`Histórico — ${currentNupMasked}`, hist);
         } else if (currentAction === "create") {
-          if (!validarObrigatoriosParaCriar()) return;
-
-          const payload = {
-            nup: pendingNup,
-            tipo: $tipo.value,
-            status: $status.value,
-            entrada_regional: $entrada.value
-          };
-
-          await createProcesso(payload);
+          if (!$tipo.value || !$entrada.value || !$status.value) { alert("Preencha Tipo, 1ª Entrada e Status."); return; }
+          const payload = { nup: pendingNup, tipo: $tipo.value, status: $status.value, entrada_regional: $entrada.value };
+          const novo = await createProcesso(payload);
           $msg.textContent = "Processo criado com sucesso.";
-          const novo = await getProcessoByNup(pendingNup);
-          if (novo) {
-            setUpdateMode(novo);
-            currentRowId = novo.id;
-            await refresh();
-            const hist = await getHistorico(novo.id);
-            histPane.innerHTML = viewHistorico(`Histórico — ${novo.nup}`, hist);
-          }
+          setUpdateMode(novo); currentRowId = novo.id; await refresh();
+          const hist = await getHistorico(novo.id);
+          histPane.innerHTML = viewHistorico(`Histórico — ${novo.nup}`, hist);
         } else {
           alert("Use o botão Buscar antes de salvar.");
         }
-      } catch (e) {
-        alert("Erro ao salvar: " + e.message);
-      }
+      } catch (e) { alert("Erro ao salvar: " + e.message); }
     });
-
     $excluir.addEventListener("click", async () => {
-      if (currentAction !== "update" || !currentRowId) {
-        alert("Busque um processo existente antes de excluir.");
-        return;
-      }
-      const confirmar = confirm("Tem certeza que deseja excluir este processo? Esta ação não pode ser desfeita.");
-      if (!confirmar) return;
-
+      if (currentAction !== "update" || !currentRowId) { alert("Busque um processo existente antes de excluir."); return; }
+      if (!confirm("Tem certeza que deseja excluir este processo? Esta ação não pode ser desfeita.")) return;
       try {
         await deleteProcesso(currentRowId);
         $msg.textContent = "Processo excluído com sucesso.";
-        resetForm(true);
-        histPane.innerHTML = viewHistorico("Histórico", []);
-        await refresh();
-        $nup.focus();
-      } catch (e) {
-        alert("Erro ao excluir: " + e.message);
-      }
+        resetForm(true); histPane.innerHTML = viewHistorico("Histórico", []); await refresh(); $nup.focus();
+      } catch (e) { alert("Erro ao excluir: " + e.message); }
     });
-
-    // Histórico (botão do formulário) – mostra na metade esquerda
     $histFrm.addEventListener("click", async () => {
       if (currentAction !== "update" || !currentRowId) return;
       try {
         const hist = await getHistorico(currentRowId);
         histPane.innerHTML = viewHistorico(`Histórico — ${currentNupMasked}`, hist);
-      } catch (e) {
-        alert("Erro ao carregar histórico: " + e.message);
-      }
+      } catch (e) { alert("Erro ao carregar histórico: " + e.message); }
     });
 
-    // ------------ carregar + atualizar grade ------------
+    // Carregar lista
     const refresh = async () => {
       gridWrap.innerHTML = "Carregando...";
       try {
@@ -885,12 +676,12 @@ export default {
         prazosMap = calcularPrazosMapa(allList, historicos);
         buildViewData();
         renderGrid();
+        resizeAll();
       } catch (e) {
         gridWrap.innerHTML = `<p>Erro ao carregar: ${e.message}</p>`;
       }
     };
 
-    // Estado inicial
     resetForm();
     await refresh();
   },
