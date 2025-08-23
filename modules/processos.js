@@ -155,7 +155,7 @@ function ensureLayoutCSS() {
     .pane-body { flex:1 1 auto; min-height:0; overflow:hidden; } /* scroller é o filho interno */
 
     /* histórico (esquerda) – scroller interno */
-    .hist-scroll { height:100%; overflow:auto; }
+    .hist-scroll { height:100%; overflow-y:auto; overflow-x:hidden; }
     .hist-pane .table { width:100%; table-layout:fixed; border-collapse:collapse; }
     .hist-pane th, .hist-pane td {
       font-size:12px; padding:4px 6px; text-align:center;
@@ -164,7 +164,7 @@ function ensureLayoutCSS() {
     .hist-scroll thead th { position:sticky; top:0; background:#fff; z-index:2; border-bottom:1px solid #ddd; }
 
     /* processos (direita) – scroller interno com cabeçalho fixo */
-    .grid-scroll { height:100%; overflow:auto; position:relative; }
+    .grid-scroll { height:100%; overflow-y:auto; overflow-x:hidden; position:relative; }
     .grid-pane .table { width:100%; table-layout:fixed; border-collapse:collapse; }
     .grid-pane td {
       font-size:12px; padding:4px 6px; text-align:center;
@@ -206,11 +206,11 @@ function applyHeights(root) {
 /* =========================
    Ordenação
    ========================= */
-function thSort(key, label, sort) {
+function thSort(key, labelHtml, sort) {
   return `
     <th data-sort-key="${key}">
       <div class="th-stack">
-        <span class="th-label" data-k="${key}" style="cursor:pointer">${label}</span>
+        <span class="th-label" data-k="${key}" style="cursor:pointer">${labelHtml}</span>
         <span class="sort-wrap">
           <button class="sort-btn ${sort.key===key && sort.dir==='asc' ? 'active':''}" data-k="${key}" data-d="asc">▲</button>
           <button class="sort-btn ${sort.key===key && sort.dir==='desc' ? 'active':''}" data-k="${key}" data-d="desc">▼</button>
@@ -228,11 +228,11 @@ function viewTabela(listView, sort) {
     <div class="grid-scroll">
       <table class="table">
         <colgroup>
-          <col style="width:22ch">   <!-- NUP: cabe inteiro -->
+          <col style="width:21ch">   <!-- NUP: cabe inteiro (20 caracteres), sem sobra excessiva -->
           <col style="width:12ch">
           <col style="width:18ch">
-          <col style="width:20ch">   <!-- 1ª Entrada Regional (título) -->
-          <col style="width:12ch">
+          <col style="width:14ch">   <!-- 1ª Entrada em duas linhas no título -->
+          <col style="width:12ch">   <!-- Prazo em duas linhas no título -->
           <col style="width:18ch">
           <col style="width:16ch">
         </colgroup>
@@ -241,8 +241,8 @@ function viewTabela(listView, sort) {
             ${thSort("nup","NUP",sort)}
             ${thSort("tipo","Tipo",sort)}
             ${thSort("status","Status",sort)}
-            ${thSort("entrada","1ª Entrada Regional",sort)}
-            ${thSort("prazo","Prazo Regional",sort)}
+            ${thSort("entrada","1ª Entrada<br>Regional",sort)}
+            ${thSort("prazo","Prazo<br>Regional",sort)}
             ${thSort("atualizadoPor","Atualizado por",sort)}
             ${thSort("atualizado","Atualizado em",sort)}
           </tr>
@@ -282,8 +282,10 @@ function viewHistorico(title, hist) {
       <div class="hist-scroll">
         <table class="table">
           <colgroup>
-            <col style="width:28%"><col style="width:24%"><col style="width:24%"><col style="width:24%">
+            <col style="width:22%"><col style="width:26%"><col style="width:26%"><col style="width:26%">
           </colgroup>
+        </table>
+        <table class="table">
           <thead>
             <tr><th>Data/Hora</th><th>De</th><th>Para</th><th>Por</th></tr>
           </thead>
