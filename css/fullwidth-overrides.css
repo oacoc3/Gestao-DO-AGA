@@ -5,6 +5,9 @@
    - Sem rolagem de página; somente rolagens internas
 */
 
+/* garante ausência de rolagem global */
+html, body { height: 100%; overflow: hidden; }
+
 /* Largura total na área dos módulos (#app) */
 #app,
 #app .container {
