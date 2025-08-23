@@ -5,23 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Gestão DO-AGA</title>
 
-  <!-- CSS principal existente do projeto -->
-  <link rel="stylesheet" href="css/styles.css" />
+  <!-- CSS principal (o seu arquivo está na raiz) -->
+  <link rel="stylesheet" href="./styles.css" />
 
-  <!-- Override: todos os módulos usam 100% da largura disponível -->
-  <link rel="stylesheet" href="css/fullwidth-overrides.css" />
+  <!-- Override para usar 100% da largura nos módulos -->
+  <link rel="stylesheet" href="./css/fullwidth-overrides.css" />
 </head>
 <body>
-  <header><!-- seu cabeçalho permanece aqui --></header>
+  <header class="app-header">
+    <div>
+      <h1 class="brand">Gestão DO-AGA</h1>
+      <nav id="nav"></nav>
+    </div>
+    <!-- área onde o app.js desenha login/usuário -->
+    <div id="auth-area"></div>
+  </header>
 
-  <!-- Onde os módulos são renderizados -->
+  <!-- onde os módulos são renderizados -->
   <main id="app"></main>
 
-  <!-- Seus scripts existentes -->
- <!-- adicione ESTA linha imediatamente antes do app.js -->
-<script src="./env.js"></script>
-
-<!-- já existente -->
-<script type="module" src="./app.js"></script>
+  <!-- IMPORTANTE: env.js antes do app.js -->
+  <script src="./env.js"></script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>
