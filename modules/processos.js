@@ -124,8 +124,7 @@ const DIA_MS = 24 * 60 * 60 * 1000;
  * Retorna um Map<processo_id, 'YYYY-MM-DD'> (string) ou '' se não puder calcular.
  */
 function calcularPrazosMapa(processos, historicos) {
-  // Mapa: processo_id -> timestamp da última "saída de Sobrestado"
-  const saidaSobMap = new Map();
+  const saidaSobMap = new Map(); // processo_id -> timestamp da última saída de Sobrestado
   for (const h of historicos) {
     const saiuDeSob =
       SOBRESTADOS.has(h.old_status) && !SOBRESTADOS.has(h.new_status);
@@ -136,28 +135,20 @@ function calcularPrazosMapa(processos, historicos) {
     }
   }
 
-  // Calcula prazos
   const prazos = new Map();
   for (const p of processos) {
     let base = null;
-
-    // 1ª Entrada Regional (se existir)
-    if (p.entrada_regional) {
-      base = new Date(p.entrada_regional);
-    }
-
-    // Saída mais recente de Sobrestado (se existir e for depois da entrada)
+    if (p.entrada_regional) base = new Date(p.entrada_regional);
     const tSaida = saidaSobMap.get(p.id);
     if (tSaida) {
       const dtSaida = new Date(tSaida);
       if (!base || dtSaida > base) base = dtSaida;
     }
-
     if (base) {
       const prazo = new Date(base.getTime() + 60 * DIA_MS);
       prazos.set(p.id, prazo.toISOString().slice(0, 10)); // YYYY-MM-DD
     } else {
-      prazos.set(p.id, ""); // sem como calcular
+      prazos.set(p.id, "");
     }
   }
   return prazos;
@@ -188,17 +179,10 @@ function ensureHistoryModal() {
       <div id="hist-body" style="max-height:60vh; overflow:auto"></div>
     </div>
   `;
-
   document.body.appendChild(modal);
-
   modal.querySelector("#hist-close").onclick = () => (modal.style.display = "none");
-  modal.addEventListener("click", (e) => {
-    if (e.target === modal) modal.style.display = "none";
-  });
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") modal.style.display = "none";
-  });
-
+  modal.addEventListener("click", (e) => { if (e.target === modal) modal.style.display = "none"; });
+  window.addEventListener("keydown", (e) => { if (e.key === "Escape") modal.style.display = "none"; });
   return modal;
 }
 
@@ -234,55 +218,113 @@ function showHistoryModal(titulo, hist) {
       </tbody>
     </table>
   `;
-
   modal.style.display = "flex";
 }
 
-// ========= Tabela (ajustada: conteúdo centralizado) =========
+// ========= Helpers de ordenação/filtragem =========
 
-function viewTabela(list, prazosMap) {
+function arrowFor(col, sort) {
+  if (sort.key !== col) return "";
+  return sort.dir === "asc" ? " ▲" : " ▼";
+}
+
+function norm(str) {
+  return (str || "").toString().toLowerCase();
+}
+
+function parseYmd(s) {
+  // "YYYY-MM-DD" -> timestamp (início do dia local)
+  if (!s) return null;
+  const d = new Date(s);
+  if (isNaN(d)) return null;
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+// ========= Tabela (com filtros + ordenação + células centralizadas) =========
+
+function viewTabela(listView, sort, filters) {
+  // Cabeçalho (com clique para ordenar) + linha de filtros
+  const th = (key, label) =>
+    `<th data-sort-key="${key}" style="text-align:center; cursor:pointer">${label}${arrowFor(key, sort)}</th>`;
+
   return `
     <table class="table">
       <thead>
         <tr>
-          <th style="text-align:center">NUP</th>
-          <th style="text-align:center">Tipo</th>
-          <th style="text-align:center">Status</th>
-          <th style="text-align:center">1ª Entrada Regional</th>
-          <th style="text-align:center">Prazo Regional</th>
-          <th style="text-align:center">Modificado por</th>
-          <th style="text-align:center">Atualizado em</th>
+          ${th("nup","NUP")}
+          ${th("tipo","Tipo")}
+          ${th("status","Status")}
+          ${th("entrada","1ª Entrada Regional")}
+          ${th("prazo","Prazo Regional")}
+          ${th("modificado","Modificado por")}
+          ${th("atualizado","Atualizado em")}
           <th style="text-align:center">Ações</th>
+        </tr>
+        <tr>
+          <th style="text-align:center">
+            <input id="flt-nup" placeholder="Filtrar..." value="${filters.nup ?? ""}" style="text-align:center; width:95%">
+          </th>
+          <th style="text-align:center">
+            <select id="flt-tipo" style="text-align:center; width:95%">
+              <option value="">Todos</option>
+              ${TIPOS.map(t => `<option ${filters.tipo===t?"selected":""}>${t}</option>`).join("")}
+            </select>
+          </th>
+          <th style="text-align:center">
+            <select id="flt-status" style="text-align:center; width:95%">
+              <option value="">Todos</option>
+              ${STATUS.map(s => `<option ${filters.status===s?"selected":""}>${s}</option>`).join("")}
+            </select>
+          </th>
+          <th style="text-align:center">
+            <div style="display:flex; gap:4px; justify-content:center">
+              <input id="flt-ent-from" type="date" value="${filters.entFrom ?? ""}" style="text-align:center">
+              <input id="flt-ent-to" type="date" value="${filters.entTo ?? ""}" style="text-align:center">
+            </div>
+          </th>
+          <th style="text-align:center">
+            <div style="display:flex; gap:6px; justify-content:center; align-items:center">
+              <label class="small"><input id="flt-prazo-sob" type="checkbox" ${filters.prazoSob?"checked":""}> Somente Sobrestado</label>
+            </div>
+          </th>
+          <th style="text-align:center">
+            <input id="flt-mod" placeholder="Filtrar..." value="${filters.mod ?? ""}" style="text-align:center; width:95%">
+          </th>
+          <th style="text-align:center">
+            <div style="display:flex; gap:4px; justify-content:center">
+              <input id="flt-atl-from" type="date" value="${filters.atlFrom ?? ""}" style="text-align:center">
+              <input id="flt-atl-to" type="date" value="${filters.atlTo ?? ""}" style="text-align:center">
+            </div>
+          </th>
+          <th style="text-align:center">
+            <button id="flt-clear">Limpar filtros</button>
+          </th>
         </tr>
       </thead>
       <tbody>
-        ${list.map(row => {
-          const prazoCell = SOBRESTADOS.has(row.status)
-            ? "Sobrestado"
-            : (prazosMap.get(row.id) ?? "");
-          return `
-            <tr data-id="${row.id}" data-nup="${row.nup}">
-              <td style="text-align:center">${row.nup}</td>
-              <td style="text-align:center">${row.tipo}</td>
-              <td style="text-align:center">
-                <div style="display:flex; justify-content:center">
-                  <select class="status-select">
-                    ${STATUS.map(s => `<option ${s === row.status ? "selected" : ""}>${s}</option>`).join("")}
-                  </select>
-                </div>
-              </td>
-              <td style="text-align:center">${row.entrada_regional ?? ""}</td>
-              <td style="text-align:center">${prazoCell}</td>
-              <td class="small" style="text-align:center">${row.modificado_por ?? ""}</td>
-              <td class="small" style="text-align:center">${new Date(row.updated_at).toLocaleString()}</td>
-              <td style="text-align:center">
-                <div style="display:flex; justify-content:center">
-                  <button class="btn-historico">Histórico</button>
-                </div>
-              </td>
-            </tr>
-          `;
-        }).join("")}
+        ${listView.map(v => `
+          <tr data-id="${v.id}" data-nup="${v.nup}">
+            <td style="text-align:center">${v.nup}</td>
+            <td style="text-align:center">${v.tipo}</td>
+            <td style="text-align:center">
+              <div style="display:flex; justify-content:center">
+                <select class="status-select">
+                  ${STATUS.map(s => `<option ${s === v.status ? "selected" : ""}>${s}</option>`).join("")}
+                </select>
+              </div>
+            </td>
+            <td style="text-align:center">${v.entrada || ""}</td>
+            <td style="text-align:center">${v.prazoDisplay}</td>
+            <td class="small" style="text-align:center">${v.modificado || ""}</td>
+            <td class="small" style="text-align:center">${v.atualizadoStr}</td>
+            <td style="text-align:center">
+              <div style="display:flex; justify-content:center">
+                <button class="btn-historico">Histórico</button>
+              </div>
+            </td>
+          </tr>
+        `).join("")}
       </tbody>
     </table>
   `;
@@ -382,6 +424,7 @@ export default {
       </div>
     `;
 
+    // ------------ refs do formulário ------------
     const el = (sel) => container.querySelector(sel);
     const $nup     = el("#f-nup");
     const $tipo    = el("#f-tipo");
@@ -395,13 +438,26 @@ export default {
     const $msg     = el("#msg-novo");
     const grid     = el("#grid");
 
+    // ------------ estado ------------
     let currentAction = null;   // 'update' | 'create' | null
     let currentRowId = null;
     let originalStatus = null;
     let pendingNup = "";
     let currentNupMasked = "";
 
-    // Máscara do NUP
+    let allList = [];          // dados crus do banco
+    let prazosMap = new Map(); // id -> "YYYY-MM-DD"
+    let viewData = [];         // dados para a grade, já com campos derivados
+
+    const filters = {
+      nup: "", tipo: "", status: "",
+      entFrom: "", entTo: "",
+      prazoSob: false,
+      mod: "", atlFrom: "", atlTo: ""
+    };
+    const sort = { key: "atualizado", dir: "desc" }; // padrão: mais recente primeiro
+
+    // ------------ máscaras e helpers do form ------------
     $nup.addEventListener("input", () => {
       const digits = onlyDigits17($nup.value);
       $nup.value = maskNUP(digits);
@@ -435,7 +491,7 @@ export default {
       $status.disabled = false;
       $salvar.disabled = false;
       $excluir.disabled = true;
-      $histFrm.disabled = true; // só habilita quando já existe (update)
+      $histFrm.disabled = true;
       currentAction = "create";
     }
 
@@ -453,7 +509,7 @@ export default {
       $entrada.disabled = true;
       $status.disabled = false;
 
-      $salvar.disabled = true; // habilita só se mudar o status
+      $salvar.disabled = true;
       $excluir.disabled = false;
       $histFrm.disabled = false;
       $msg.textContent = "Processo encontrado. Altere o Status se necessário ou consulte o Histórico.";
@@ -482,7 +538,131 @@ export default {
       }
     });
 
-    // Buscar
+    // ------------ grid: montagem dos dados de visualização ------------
+    function buildViewData() {
+      viewData = allList.map(r => {
+        const prazoStr = SOBRESTADOS.has(r.status) ? "Sobrestado" : (prazosMap.get(r.id) || "");
+        const prazoTS = prazoStr && prazoStr !== "Sobrestado" ? new Date(prazoStr).getTime() : null;
+        const entradaTS = r.entrada_regional ? new Date(r.entrada_regional).getTime() : null;
+        const atualizadoTS = r.updated_at ? new Date(r.updated_at).getTime() : 0;
+        return {
+          id: r.id,
+          nup: r.nup,
+          tipo: r.tipo,
+          status: r.status,
+          entrada: r.entrada_regional || "",
+          modificado: r.modificado_por || "",
+          atualizado: atualizadoTS,
+          atualizadoStr: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
+          prazoDisplay: prazoStr,
+          prazoTS, entradaTS
+        };
+      });
+    }
+
+    function applyFiltersSort() {
+      let arr = viewData.slice();
+
+      // Filtros
+      if (filters.nup) arr = arr.filter(v => norm(v.nup).includes(norm(filters.nup)));
+      if (filters.tipo) arr = arr.filter(v => v.tipo === filters.tipo);
+      if (filters.status) arr = arr.filter(v => v.status === filters.status);
+      if (filters.entFrom) {
+        const t = parseYmd(filters.entFrom);
+        arr = arr.filter(v => (v.entradaTS ?? 0) >= (t ?? 0));
+      }
+      if (filters.entTo) {
+        const t = parseYmd(filters.entTo);
+        arr = arr.filter(v => (v.entradaTS ?? 0) <= (t ? t + (24*60*60*1000 - 1) : Infinity));
+      }
+      if (filters.prazoSob) arr = arr.filter(v => v.prazoDisplay === "Sobrestado");
+      if (filters.mod) arr = arr.filter(v => norm(v.modificado).includes(norm(filters.mod)));
+      if (filters.atlFrom) {
+        const t = parseYmd(filters.atlFrom);
+        arr = arr.filter(v => v.atualizado >= (t ?? 0));
+      }
+      if (filters.atlTo) {
+        const t = parseYmd(filters.atlTo);
+        arr = arr.filter(v => v.atualizado <= (t ? t + (24*60*60*1000 - 1) : Infinity));
+      }
+
+      // Ordenação
+      const key = sort.key, dir = sort.dir === "asc" ? 1 : -1;
+      const val = (v) => {
+        switch (key) {
+          case "nup": return v.nup || "";
+          case "tipo": return v.tipo || "";
+          case "status": return v.status || "";
+          case "entrada": return v.entradaTS ?? -Infinity;
+          case "prazo": return (v.prazoDisplay === "Sobrestado") ? Number.POSITIVE_INFINITY : (v.prazoTS ?? Number.POSITIVE_INFINITY);
+          case "modificado": return v.modificado || "";
+          case "atualizado": return v.atualizado ?? 0;
+          default: return "";
+        }
+      };
+      arr.sort((a, b) => {
+        const va = val(a), vb = val(b);
+        if (va === vb) return 0;
+        return (va > vb ? 1 : -1) * dir;
+      });
+
+      return arr;
+    }
+
+    function attachFilterSortHandlers() {
+      const qs = (s) => grid.querySelector(s);
+
+      // Ordenação por clique no cabeçalho
+      grid.querySelectorAll("th[data-sort-key]").forEach(th => {
+        th.addEventListener("click", () => {
+          const key = th.getAttribute("data-sort-key");
+          if (sort.key === key) {
+            sort.dir = sort.dir === "asc" ? "desc" : "asc";
+          } else {
+            sort.key = key;
+            sort.dir = "asc";
+          }
+          renderGrid(); // re-render com nova ordenação
+        });
+      });
+
+      // Filtros
+      const bind = (id, prop, isCheckbox = false) => {
+        const el = qs(id);
+        if (!el) return;
+        el.addEventListener("input", () => {
+          filters[prop] = isCheckbox ? el.checked : el.value;
+          renderGrid();
+        });
+      };
+      bind("#flt-nup", "nup");
+      bind("#flt-tipo", "tipo");
+      bind("#flt-status", "status");
+      bind("#flt-ent-from", "entFrom");
+      bind("#flt-ent-to", "entTo");
+      bind("#flt-prazo-sob", "prazoSob", true);
+      bind("#flt-mod", "mod");
+      bind("#flt-atl-from", "atlFrom");
+      bind("#flt-atl-to", "atlTo");
+
+      const clear = qs("#flt-clear");
+      if (clear) {
+        clear.addEventListener("click", () => {
+          Object.assign(filters, { nup:"", tipo:"", status:"", entFrom:"", entTo:"", prazoSob:false, mod:"", atlFrom:"", atlTo:"" });
+          renderGrid();
+        });
+      }
+    }
+
+    // ------------ renderização da grade ------------
+    function renderGrid() {
+      const listView = applyFiltersSort();
+      grid.innerHTML = viewTabela(listView, sort, filters);
+      bindTabela(grid, refresh);           // ações por linha
+      attachFilterSortHandlers();          // filtros e ordenação
+    }
+
+    // ------------ fluxo de busca/salvar/excluir do formulário ------------
     $buscar.addEventListener("click", async () => {
       const digits = onlyDigits17($nup.value);
       if (digits.length !== 17) {
@@ -492,7 +672,7 @@ export default {
       }
       const nupMasked = maskNUP(digits);
 
-      resetForm(false); // mantém o NUP visível durante a busca
+      resetForm(false);
       $msg.textContent = "Buscando...";
 
       try {
@@ -510,14 +690,12 @@ export default {
       }
     });
 
-    // Limpar
     $limpar.addEventListener("click", () => {
       resetForm(true);
       $msg.textContent = "NUP limpo.";
       $nup.focus();
     });
 
-    // Salvar
     $salvar.addEventListener("click", async () => {
       try {
         if (currentAction === "update") {
@@ -534,7 +712,7 @@ export default {
           if (!validarObrigatoriosParaCriar()) return;
 
           const payload = {
-            nup: pendingNup,                 // formato 00000.000000/0000-00
+            nup: pendingNup,
             tipo: $tipo.value,
             status: $status.value,
             entrada_regional: $entrada.value
@@ -553,7 +731,6 @@ export default {
       }
     });
 
-    // Excluir
     $excluir.addEventListener("click", async () => {
       if (currentAction !== "update" || !currentRowId) {
         alert("Busque um processo existente antes de excluir.");
@@ -573,7 +750,6 @@ export default {
       }
     });
 
-    // Histórico (botão do formulário)
     $histFrm.addEventListener("click", async () => {
       if (currentAction !== "update" || !currentRowId) return;
       try {
@@ -584,25 +760,22 @@ export default {
       }
     });
 
-    // --------- Lista (grid) ---------
+    // ------------ carregar + atualizar grade ------------
     const refresh = async () => {
       grid.textContent = "Carregando...";
       try {
-        const list = await listProcessos();
-
-        // Calcula "Prazo Regional" para todos os itens
-        const ids = list.map(r => r.id);
+        allList = await listProcessos();
+        const ids = allList.map(r => r.id);
         const historicos = await getHistoricoBatch(ids);
-        const prazosMap = calcularPrazosMapa(list, historicos);
-
-        grid.innerHTML = viewTabela(list, prazosMap);
-        bindTabela(container, refresh);
+        prazosMap = calcularPrazosMapa(allList, historicos);
+        buildViewData();
+        renderGrid();
       } catch (e) {
         grid.innerHTML = `<p>Erro ao carregar: ${e.message}</p>`;
       }
     };
 
-    resetForm();      // estado inicial
+    resetForm();
     await refresh();
   },
 };
