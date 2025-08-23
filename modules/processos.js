@@ -191,12 +191,10 @@ function ensureHistoryModal() {
 
   document.body.appendChild(modal);
 
-  // Fecha ao clicar no X ou fora do conteúdo
   modal.querySelector("#hist-close").onclick = () => (modal.style.display = "none");
   modal.addEventListener("click", (e) => {
     if (e.target === modal) modal.style.display = "none";
   });
-  // Fecha com ESC
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") modal.style.display = "none";
   });
@@ -214,10 +212,10 @@ function showHistoryModal(titulo, hist) {
     const de = h.old_status ?? "(criação)";
     const para = h.new_status ?? "(sem status)";
     return `<tr>
-      <td>${quando}</td>
-      <td>${de}</td>
-      <td>${para}</td>
-      <td>${autor}</td>
+      <td style="text-align:center">${quando}</td>
+      <td style="text-align:center">${de}</td>
+      <td style="text-align:center">${para}</td>
+      <td style="text-align:center">${autor}</td>
     </tr>`;
   }).join("");
 
@@ -225,14 +223,14 @@ function showHistoryModal(titulo, hist) {
     <table class="table">
       <thead>
         <tr>
-          <th>Data/Hora</th>
-          <th>De</th>
-          <th>Para</th>
-          <th>Por</th>
+          <th style="text-align:center">Data/Hora</th>
+          <th style="text-align:center">De</th>
+          <th style="text-align:center">Para</th>
+          <th style="text-align:center">Por</th>
         </tr>
       </thead>
       <tbody>
-        ${rows || `<tr><td colspan="4">Sem histórico.</td></tr>`}
+        ${rows || `<tr><td style="text-align:center" colspan="4">Sem histórico.</td></tr>`}
       </tbody>
     </table>
   `;
@@ -240,43 +238,48 @@ function showHistoryModal(titulo, hist) {
   modal.style.display = "flex";
 }
 
-// ========= Tabela (ajustada) =========
+// ========= Tabela (ajustada: conteúdo centralizado) =========
 
 function viewTabela(list, prazosMap) {
   return `
     <table class="table">
       <thead>
         <tr>
-          <th>NUP</th>
-          <th>Tipo</th>
-          <th>Status</th>
-          <th>1ª Entrada Regional</th>
-          <th>Prazo Regional</th>
-          <th class="right">Modificado por</th>
-          <th>Atualizado em</th>
-          <th>Ações</th>
+          <th style="text-align:center">NUP</th>
+          <th style="text-align:center">Tipo</th>
+          <th style="text-align:center">Status</th>
+          <th style="text-align:center">1ª Entrada Regional</th>
+          <th style="text-align:center">Prazo Regional</th>
+          <th style="text-align:center">Modificado por</th>
+          <th style="text-align:center">Atualizado em</th>
+          <th style="text-align:center">Ações</th>
         </tr>
       </thead>
       <tbody>
         ${list.map(row => {
-          // Regra 1: se estiver Sobrestado, mostra "Sobrestado"
           const prazoCell = SOBRESTADOS.has(row.status)
             ? "Sobrestado"
             : (prazosMap.get(row.id) ?? "");
           return `
             <tr data-id="${row.id}" data-nup="${row.nup}">
-              <td>${row.nup}</td>
-              <td>${row.tipo}</td>
-              <td>
-                <select class="status-select">
-                  ${STATUS.map(s => `<option ${s === row.status ? "selected" : ""}>${s}</option>`).join("")}
-                </select>
+              <td style="text-align:center">${row.nup}</td>
+              <td style="text-align:center">${row.tipo}</td>
+              <td style="text-align:center">
+                <div style="display:flex; justify-content:center">
+                  <select class="status-select">
+                    ${STATUS.map(s => `<option ${s === row.status ? "selected" : ""}>${s}</option>`).join("")}
+                  </select>
+                </div>
               </td>
-              <td>${row.entrada_regional ?? ""}</td>
-              <td>${prazoCell}</td>
-              <td class="right small">${row.modificado_por ?? ""}</td>
-              <td class="small">${new Date(row.updated_at).toLocaleString()}</td>
-              <td><button class="btn-historico">Histórico</button></td>
+              <td style="text-align:center">${row.entrada_regional ?? ""}</td>
+              <td style="text-align:center">${prazoCell}</td>
+              <td class="small" style="text-align:center">${row.modificado_por ?? ""}</td>
+              <td class="small" style="text-align:center">${new Date(row.updated_at).toLocaleString()}</td>
+              <td style="text-align:center">
+                <div style="display:flex; justify-content:center">
+                  <button class="btn-historico">Histórico</button>
+                </div>
+              </td>
             </tr>
           `;
         }).join("")}
@@ -324,9 +327,10 @@ function viewFormulario() {
         </div>
       </div>
 
-      <div style="margin-top:12px">
+      <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">
         <button id="btn-salvar" disabled>Salvar</button>
-        <button id="btn-excluir" disabled style="margin-left:8px">Excluir</button>
+        <button id="btn-excluir" disabled>Excluir</button>
+        <button id="btn-historico-form" disabled>Histórico</button>
       </div>
 
       <div id="msg-novo" class="small" style="margin-top:8px"></div>
@@ -387,6 +391,7 @@ export default {
     const $limpar  = el("#btn-limpar");
     const $salvar  = el("#btn-salvar");
     const $excluir = el("#btn-excluir");
+    const $histFrm = el("#btn-historico-form");
     const $msg     = el("#msg-novo");
     const grid     = el("#grid");
 
@@ -394,6 +399,7 @@ export default {
     let currentRowId = null;
     let originalStatus = null;
     let pendingNup = "";
+    let currentNupMasked = "";
 
     // Máscara do NUP
     $nup.addEventListener("input", () => {
@@ -412,20 +418,24 @@ export default {
       $status.disabled = true;
       $salvar.disabled = true;
       $excluir.disabled = true;
+      $histFrm.disabled = true;
       currentAction = null;
       currentRowId = null;
       originalStatus = null;
       pendingNup = "";
+      currentNupMasked = "";
     }
 
     function setCreateMode(nupMasked) {
       pendingNup = nupMasked;
+      currentNupMasked = nupMasked;
       $msg.textContent = "Preencha os campos e clique em Salvar.";
       $tipo.disabled = false;
       $entrada.disabled = false;
       $status.disabled = false;
       $salvar.disabled = false;
       $excluir.disabled = true;
+      $histFrm.disabled = true; // só habilita quando já existe (update)
       currentAction = "create";
     }
 
@@ -433,6 +443,7 @@ export default {
       currentAction = "update";
       currentRowId = row.id;
       originalStatus = row.status;
+      currentNupMasked = row.nup;
 
       $tipo.value = row.tipo || "";
       $entrada.value = row.entrada_regional || "";
@@ -444,7 +455,8 @@ export default {
 
       $salvar.disabled = true; // habilita só se mudar o status
       $excluir.disabled = false;
-      $msg.textContent = "Processo encontrado. Altere o Status se necessário e clique em Salvar (ou Excluir).";
+      $histFrm.disabled = false;
+      $msg.textContent = "Processo encontrado. Altere o Status se necessário ou consulte o Histórico.";
     }
 
     function perguntaCriar(onDecide) {
@@ -558,6 +570,17 @@ export default {
         await refresh();
       } catch (e) {
         alert("Erro ao excluir: " + e.message);
+      }
+    });
+
+    // Histórico (botão do formulário)
+    $histFrm.addEventListener("click", async () => {
+      if (currentAction !== "update" || !currentRowId) return;
+      try {
+        const hist = await getHistorico(currentRowId);
+        showHistoryModal(`Histórico — ${currentNupMasked}`, hist);
+      } catch (e) {
+        alert("Erro ao carregar histórico: " + e.message);
       }
     });
 
