@@ -325,7 +325,7 @@ function viewHistorico(title, hist) {
   `;
   const rows = (hist || []).map(h => {
     const autor = h.changed_by_email || h.changed_by || "(desconhecido)";
-    the const quando = new Date(h.changed_at).toLocaleString();
+    const quando = new Date(h.changed_at).toLocaleString(); // <-- corrigido (sem "the")
     const de = h.old_status ?? "(criação)";
     const para = h.new_status ?? "(sem status)";
     return `<div class="hist-row"><div>${quando}</div><div>${de}</div><div>${para}</div><div>${autor}</div></div>`;
@@ -473,7 +473,7 @@ export default {
     let prazosMap = new Map();
     let viewData = [];
 
-    // NOVO: id "pinned" para ir ao topo após busca
+    // id "pinned" para ir ao topo após busca
     let pinnedId = null;
 
     const sort = { key:"atualizado", dir:"desc" };
@@ -561,7 +561,7 @@ export default {
       const arr = viewData.slice();
       arr.sort((a,b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * dir);
 
-      // NOVO: se houver um "pinnedId", move essa linha para o topo
+      // se houver um "pinnedId", move essa linha para o topo
       if (pinnedId != null) {
         const idx = arr.findIndex(v => String(v.id) === String(pinnedId));
         if (idx > 0) {
@@ -616,7 +616,7 @@ export default {
         if (row) {
           setUpdateMode(row); 
           currentRowId = row.id;
-          pinnedId = row.id; // << NOVO: pino para ir ao topo
+          pinnedId = row.id; // pino para ir ao topo
           renderGrid();
           const hist = await getHistorico(row.id);
           histPane.innerHTML = viewHistorico(`Histórico — ${row.nup}`, hist);
