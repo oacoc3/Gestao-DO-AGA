@@ -1,30 +1,28 @@
 // modules/admin.js
-// Administração de usuários via Netlify Function protegida.
-// Ao criar usuário: NÃO define senha e já envia e-mail de "Definir senha".
-//
-// Siglas:
-// - JWT: JSON Web Token (contém app_metadata.perfil do usuário)
-// - RLS: Row Level Security (regras de acesso no banco)
-// - CRUD: Create, Read, Update, Delete (Criar/Ler/Atualizar/Excluir)
+// Administração de usuários via Netlify Function.
+// Ao criar usuário: não define senha e já envia e-mail de "Definir senha".
+// TOTALMENTE ISOLADO: classes prefixadas .adm-*
 
 import { supabase } from "../supabaseClient.js";
 
-function cssOnce() {
-  if (document.getElementById("admin-css")) return;
+function injectAdmCssOnce() {
+  if (document.getElementById("adm-css")) return;
   const st = document.createElement("style");
-  st.id = "admin-css";
+  st.id = "adm-css";
   st.textContent = `
-    .adm-card { padding:12px; }
-    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; }
-    .row > div { display:flex; flex-direction:column; }
-    .row label { margin-bottom:4px; }
-    .row input, .row select, .row button { height:34px; }
-    .grid { margin-top:12px; height: calc(100vh - 280px); overflow:auto; }
-    .grid table { width:100%; border-collapse:collapse; }
-    .grid th, .grid td { border-bottom:1px solid #ddd; padding:6px; font-size:12px; text-align:center; white-space:nowrap; }
-    .grid thead th { position: sticky; top:0; background:#fff; }
-    .actions button { margin:0 2px; }
-    .msg { margin-top:8px; font-size:12px; }
+    .adm-wrap { padding: 8px 0; }
+    .adm-title { margin: 0 0 8px 0; font-size: 18px; }
+    .adm-row { display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; }
+    .adm-row > div { display:flex; flex-direction:column; }
+    .adm-row label { margin-bottom:4px; font-size: 14px; }
+    .adm-row input, .adm-row select, .adm-row button { height:34px; }
+    .adm-msg { margin-top:8px; font-size:12px; }
+
+    .adm-grid { margin-top:12px; height: calc(100vh - 280px); overflow:auto; }
+    .adm-grid table { width:100%; border-collapse:collapse; }
+    .adm-grid th, .adm-grid td { border-bottom:1px solid #ddd; padding:6px; font-size:12px; text-align:center; white-space:nowrap; }
+    .adm-grid thead th { position: sticky; top:0; background:#fff; }
+    .adm-actions button { margin:0 2px; }
   `;
   document.head.appendChild(st);
 }
@@ -40,10 +38,10 @@ async function ensureAdmin() {
   return perfil === "Administrador";
 }
 
-async function callAPI(path, method="GET", body=null) {
+async function callAPI(path="", method="GET", body=null) {
   const sess = await getSession();
   const token = sess?.access_token;
-  const res = await fetch(`/.netlify/functions/adminUsers${path || ""}`, {
+  const res = await fetch(`/.netlify/functions/adminUsers${path}`, {
     method,
     headers: {
       "Content-Type":"application/json",
@@ -63,52 +61,50 @@ export default {
   title: "Administração",
   route: "#/admin",
   async view(container) {
-    cssOnce();
+    injectAdmCssOnce();
 
     container.innerHTML = `
-      <div class="container">
-        <div class="card adm-card">
-          <h3>Administração de Usuários</h3>
+      <div class="adm-wrap">
+        <h3 class="adm-title">Administração de Usuários</h3>
 
-          <div id="adm-guard"><em>Validando permissões...</em></div>
+        <div id="adm-guard"><em>Validando permissões...</em></div>
 
-          <div id="adm-area" style="display:none">
-            <h4>Novo/Editar usuário</h4>
-            <div class="row">
-              <div><label>Posto/Graduação</label><input id="pg" /></div>
-              <div><label>Nome de Guerra</label><input id="ng" /></div>
-              <div><label>Nome completo</label><input id="fn" /></div>
-              <div><label>E-mail</label><input id="em" type="email" /></div>
-              <div>
-                <label>Perfil</label>
-                <select id="pf">${PERFIS.map(p=>`<option value="${p}">${p}</option>`).join("")}</select>
-              </div>
-              <!-- Campo de senha não é usado no fluxo simples; mantido para futuro, se quiser -->
-              <div><label>Senha inicial (ignorada)</label><input id="pw" type="password" placeholder="Fluxo envia e-mail para definir senha" disabled /></div>
-              <div><label>&nbsp;</label><button id="btn-save">Salvar</button></div>
-              <div><label>&nbsp;</label><button id="btn-clear" type="button">Limpar</button></div>
+        <div id="adm-area" style="display:none">
+          <h4 style="margin:8px 0;">Novo/Editar usuário</h4>
+          <div class="adm-row">
+            <div><label>Posto/Graduação</label><input id="pg" /></div>
+            <div><label>Nome de Guerra</label><input id="ng" /></div>
+            <div><label>Nome completo</label><input id="fn" /></div>
+            <div><label>E-mail</label><input id="em" type="email" /></div>
+            <div>
+              <label>Perfil</label>
+              <select id="pf">${PERFIS.map(p=>`<option value="${p}">${p}</option>`).join("")}</select>
             </div>
+            <!-- Campo de senha desativado neste fluxo -->
+            <div><label>Senha inicial (ignorada)</label><input id="pw" type="password" placeholder="Fluxo envia e-mail para definir senha" disabled /></div>
+            <div><label>&nbsp;</label><button id="btn-save">Salvar</button></div>
+            <div><label>&nbsp;</label><button id="btn-clear" type="button">Limpar</button></div>
+          </div>
 
-            <div class="msg" id="msg"></div>
+          <div class="adm-msg" id="msg"></div>
 
-            <h4 style="margin-top:12px">Usuários</h4>
-            <div class="grid">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Posto/Graduação</th>
-                    <th>Nome de Guerra</th>
-                    <th>Nome completo</th>
-                    <th>E-mail</th>
-                    <th>Perfil</th>
-                    <th>Deve trocar senha?</th>
-                    <th>Atualizado em</th>
-                    <th>Ações</th>
-                  </tr>
-                </thead>
-                <tbody id="tb"></tbody>
-              </table>
-            </div>
+          <h4 style="margin:12px 0 4px;">Usuários</h4>
+          <div class="adm-grid">
+            <table>
+              <thead>
+                <tr>
+                  <th>Posto/Graduação</th>
+                  <th>Nome de Guerra</th>
+                  <th>Nome completo</th>
+                  <th>E-mail</th>
+                  <th>Perfil</th>
+                  <th>Deve trocar senha?</th>
+                  <th>Atualizado em</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody id="tb"></tbody>
+            </table>
           </div>
         </div>
       </div>
@@ -136,7 +132,6 @@ export default {
     $guard.style.display = "none";
     $area.style.display = "";
 
-    // Funções
     function clearForm() {
       editingId = null;
       $pg.value = ""; $ng.value = ""; $fn.value = ""; $em.value = ""; $pf.value = "Visitante"; $pw.value = "";
@@ -164,7 +159,7 @@ export default {
           <td>${r.perfil || ""}</td>
           <td>${r.must_change_password ? "Sim" : "Não"}</td>
           <td>${r.updated_at ? new Date(r.updated_at).toLocaleString() : ""}</td>
-          <td class="actions">
+          <td class="adm-actions">
             <button class="btn-edit">Editar</button>
             <button class="btn-reset">Resetar senha</button>
             <button class="btn-del">Excluir</button>
@@ -223,7 +218,7 @@ export default {
       });
     }
 
-    // Ações do formulário
+    // Salvar
     container.querySelector("#btn-save").onclick = async () => {
       const payload = {
         email: $em.value.trim(),
@@ -241,10 +236,9 @@ export default {
         }
 
         if (!editingId) {
-          // CRIAR: sem senha, e já dispara e-mail de "definir senha"
+          // CRIAR: sem senha; em seguida, manda o e-mail para o usuário definir a senha
           $msg.textContent = "Criando usuário...";
           await callAPI("", "POST", payload);
-
           $msg.textContent = "Enviando e-mail para definir senha...";
           await callAPI("?action=reset", "POST", { email: payload.email });
 
