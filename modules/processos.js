@@ -36,6 +36,7 @@ function maskNUP(digits) {
     d.slice(15, 17)
   );
 }
+function isFullNUP(value) { return onlyDigits17(value).length === 17; }
 
 // ========= Acesso ao banco =========
 
@@ -44,7 +45,7 @@ async function listProcessos() {
     .from("processos")
     .select("*")
     .order("updated_at", { ascending: false })
-    .limit(200);
+    .limit(500);
   if (error) throw error;
   return data;
 }
@@ -124,8 +125,7 @@ const DIA_MS = 24 * 60 * 60 * 1000;
  * Retorna um Map<processo_id, 'YYYY-MM-DD'> (string) ou '' se não puder calcular.
  */
 function calcularPrazosMapa(processos, historicos) {
-  // processo_id -> timestamp da última saída de Sobrestado
-  const saidaSobMap = new Map();
+  const saidaSobMap = new Map(); // processo_id -> timestamp da última saída de Sobrestado
   for (const h of historicos) {
     const saiuDeSob =
       SOBRESTADOS.has(h.old_status) && !SOBRESTADOS.has(h.new_status);
@@ -155,76 +155,62 @@ function calcularPrazosMapa(processos, historicos) {
   return prazos;
 }
 
-// ========= Modal (popup) para Histórico =========
+// ========= CSS de layout responsivo em duas metades, cabeçalhos fixos =========
 
-function ensureHistoryModal() {
-  let modal = document.getElementById("hist-modal");
-  if (modal) return modal;
+function ensureLayoutCSS() {
+  if (document.getElementById("spa-two-pane-css")) return;
+  const style = document.createElement("style");
+  style.id = "spa-two-pane-css";
+  style.textContent = `
+    /* container do módulo ocupa a viewport inteira e não rola a página */
+    .proc-mod { height: 100vh; display:flex; flex-direction:column; overflow: hidden; }
 
-  modal = document.createElement("div");
-  modal.id = "hist-modal";
-  modal.style.position = "fixed";
-  modal.style.inset = "0";
-  modal.style.display = "none";
-  modal.style.alignItems = "center";
-  modal.style.justifyContent = "center";
-  modal.style.background = "rgba(0,0,0,0.4)";
-  modal.style.zIndex = "1000";
+    /* formulário: ocupa toda a largura */
+    .proc-form-card { flex:0 0 auto; }
+    .proc-form-row { display:flex; align-items:flex-end; gap:8px; flex-wrap:nowrap; overflow:auto; }
+    .proc-form-row > div { display:flex; flex-direction:column; }
 
-  modal.innerHTML = `
-    <div style="background:#fff; max-width:900px; width:90%; border-radius:8px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,.2)">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
-        <h3 id="hist-title" style="margin:0">Histórico</h3>
-        <button id="hist-close">Fechar</button>
-      </div>
-      <div id="hist-body" style="max-height:60vh; overflow:auto"></div>
-    </div>
+    /* faixa inferior em duas metades */
+    .proc-split { flex:1 1 auto; min-height:0; display:flex; gap:8px; overflow:hidden; }
+    .proc-pane { flex:1 1 50%; min-width:0; display:flex; flex-direction:column; overflow:hidden; }
+    .proc-pane .pane-title { margin:0 0 8px 0; }
+    .proc-pane .pane-body { flex:1 1 auto; min-height:0; overflow:auto; }
+
+    /* grade (direita): sem rolagem horizontal, cabeçalho + filtros fixos, rolagem vertical interna */
+    .grid-pane .pane-body { overflow:auto; }
+    .grid-pane .table { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .grid-pane th, .grid-pane td { font-size:12px; padding:4px 6px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .grid-pane select { font-size:12px; }
+    .grid-scroll { height:100%; overflow:auto; position:relative; }
+    .grid-scroll thead th { position: sticky; background:#fff; z-index:3; }
+    .grid-scroll thead tr:nth-child(1) th { top: 0; }
+    .grid-scroll thead tr:nth-child(2) th { top: 30px; } /* altura aproximada da 1ª linha */
+    .grid-scroll thead tr:nth-child(1) th, .grid-scroll thead tr:nth-child(2) th { border-bottom:1px solid #ddd; }
+    .grid-controls { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+
+    /* histórico (esquerda): tabela com cabeçalho fixo e rolagem vertical interna */
+    .hist-pane .table { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .hist-pane th, .hist-pane td { font-size:12px; padding:4px 6px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .hist-scroll { height:100%; overflow:auto; position:relative; }
+    .hist-scroll thead th { position:sticky; top:0; background:#fff; z-index:2; border-bottom:1px solid #ddd; }
+
+    /* responsividade: em telas bem estreitas, mantém metades lado a lado mas com tipografia ainda mais compacta */
+    @media (max-width: 900px) {
+      .grid-pane th, .grid-pane td, .hist-pane th, .hist-pane td { font-size:11px; padding:3px 4px; }
+      .grid-scroll thead tr:nth-child(2) th { top: 28px; }
+    }
+    @media (max-width: 600px) {
+      .grid-pane th, .grid-pane td, .hist-pane th, .hist-pane td { font-size:10px; padding:2px 3px; }
+      .grid-scroll thead tr:nth-child(2) th { top: 26px; }
+    }
+
+    /* destaque da linha selecionada na lista */
+    .row-selected { outline: 2px solid #999; }
   `;
-  document.body.appendChild(modal);
-  modal.querySelector("#hist-close").onclick = () => (modal.style.display = "none");
-  modal.addEventListener("click", (e) => { if (e.target === modal) modal.style.display = "none"; });
-  window.addEventListener("keydown", (e) => { if (e.key === "Escape") modal.style.display = "none"; });
-  return modal;
+  document.head.appendChild(style);
 }
 
-function showHistoryModal(titulo, hist) {
-  const modal = ensureHistoryModal();
-  modal.querySelector("#hist-title").textContent = titulo;
-
-  const rows = (hist || []).map(h => {
-    const autor = h.changed_by_email || h.changed_by || "(desconhecido)";
-    const quando = new Date(h.changed_at).toLocaleString();
-    const de = h.old_status ?? "(criação)";
-    const para = h.new_status ?? "(sem status)";
-    return `<tr>
-      <td style="text-align:center">${quando}</td>
-      <td style="text-align:center">${de}</td>
-      <td style="text-align:center">${para}</td>
-      <td style="text-align:center">${autor}</td>
-    </tr>`;
-  }).join("");
-
-  modal.querySelector("#hist-body").innerHTML = `
-    <div class="table-wrap">
-      <table class="table">
-        <thead>
-          <tr>
-            <th style="text-align:center">Data/Hora</th>
-            <th style="text-align:center">De</th>
-            <th style="text-align:center">Para</th>
-            <th style="text-align:center">Por</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows || `<tr><td style="text-align:center" colspan="4">Sem histórico.</td></tr>`}
-        </tbody>
-      </table>
-    </div>
-  `;
-  modal.style.display = "flex";
-}
-
-// ========= Helpers de ordenação/filtragem =========
+// ========= UI helpers (setinhas de ordenação, normalização etc.) =========
 
 function arrowFor(col, sort) {
   if (sort.key !== col) return "";
@@ -239,51 +225,21 @@ function parseYmd(s) {
   return d.getTime();
 }
 
-// ========= (NOVO) CSS responsivo injetado =========
+// ========= Render da tabela da lista (cabeçalho + filtros fixos) =========
 
-function ensureResponsiveCSS() {
-  if (document.getElementById("spa-responsive-css")) return;
-  const style = document.createElement("style");
-  style.id = "spa-responsive-css";
-  style.textContent = `
-    /* Mantém o formulário numa linha em telas largas */
-    .form-row { display:flex; align-items:flex-end; gap:8px; flex-wrap:nowrap; overflow:auto; }
-    .form-row > div { display:flex; flex-direction:column; }
-    /* Envelopes para rolagem horizontal da tabela quando necessário */
-    .table-wrap { width:100%; overflow-x:auto; }
-    .table-wrap .table { min-width: 980px; } /* evita "amassar" colunas */
-
-    /* Quebra em múltiplas linhas quando a tela reduzir */
-    @media (max-width: 1200px) {
-      .form-row { flex-wrap: wrap !important; }
-      .form-row > div { min-width: 160px; }
-    }
-    @media (max-width: 900px) {
-      .form-row { gap: 6px; }
-      .form-row > div { flex: 1 1 45%; min-width: 140px; }
-      .form-row button { width: 100%; }
-    }
-    @media (max-width: 560px) {
-      .form-row { flex-direction: column; align-items: stretch; }
-      .form-row > div { width: 100%; }
-      .form-row button { width: 100%; }
-      .table-wrap .table { min-width: 700px; } /* para modais/lista em telas bem pequenas */
-    }
-  `;
-  document.head.appendChild(style);
-}
-
-// ========= Tabela (com filtros + ordenação + células centralizadas) =========
-
-function viewTabela(listView, sort, filters) {
+function viewTabela(listView, sort, filters, STATUS, TIPOS) {
   const th = (key, label) =>
-    `<th data-sort-key="${key}" style="text-align:center; cursor:pointer">${label}${arrowFor(key, sort)}</th>`;
+    `<th data-sort-key="${key}" style="cursor:pointer">${label}${arrowFor(key, sort)}</th>`;
 
   return `
-    <div class="table-wrap">
+    <div class="grid-controls">
+      <div style="font-weight:bold">Lista de processos</div>
+      <button id="flt-clear">Limpar filtros</button>
+    </div>
+    <div class="grid-scroll">
       <table class="table">
         <thead>
-          <tr>
+          <tr class="thead1">
             ${th("nup","NUP")}
             ${th("tipo","Tipo")}
             ${th("status","Status")}
@@ -291,70 +247,60 @@ function viewTabela(listView, sort, filters) {
             ${th("prazo","Prazo Regional")}
             ${th("modificado","Modificado por")}
             ${th("atualizado","Atualizado em")}
-            <th style="text-align:center">Ações</th>
+            <th>Ações</th>
           </tr>
-          <tr>
-            <th style="text-align:center">
-              <input id="flt-nup" placeholder="Filtrar..." value="${filters.nup ?? ""}" style="text-align:center; width:95%">
+          <tr class="thead2">
+            <th>
+              <input id="flt-nup" placeholder="Filtrar..." value="${filters.nup ?? ""}" style="width:95%">
             </th>
-            <th style="text-align:center">
-              <select id="flt-tipo" style="text-align:center; width:95%">
+            <th>
+              <select id="flt-tipo" style="width:95%">
                 <option value="">Todos</option>
                 ${TIPOS.map(t => `<option ${filters.tipo===t?"selected":""}>${t}</option>`).join("")}
               </select>
             </th>
-            <th style="text-align:center">
-              <select id="flt-status" style="text-align:center; width:95%">
+            <th>
+              <select id="flt-status" style="width:95%">
                 <option value="">Todos</option>
                 ${STATUS.map(s => `<option ${filters.status===s?"selected":""}>${s}</option>`).join("")}
               </select>
             </th>
-            <th style="text-align:center">
+            <th>
               <div style="display:flex; gap:4px; justify-content:center">
-                <input id="flt-ent-from" type="date" value="${filters.entFrom ?? ""}" style="text-align:center">
-                <input id="flt-ent-to" type="date" value="${filters.entTo ?? ""}" style="text-align:center">
+                <input id="flt-ent-from" type="date" value="${filters.entFrom ?? ""}">
+                <input id="flt-ent-to" type="date" value="${filters.entTo ?? ""}">
               </div>
             </th>
-            <th style="text-align:center">
-              <div style="display:flex; gap:6px; justify-content:center; align-items:center">
-                <label class="small"><input id="flt-prazo-sob" type="checkbox" ${filters.prazoSob?"checked":""}> Somente Sobrestado</label>
-              </div>
+            <th>
+              <label class="small"><input id="flt-prazo-sob" type="checkbox" ${filters.prazoSob?"checked":""}> Somente Sobrestado</label>
             </th>
-            <th style="text-align:center">
-              <input id="flt-mod" placeholder="Filtrar..." value="${filters.mod ?? ""}" style="text-align:center; width:95%">
+            <th>
+              <input id="flt-mod" placeholder="Filtrar..." value="${filters.mod ?? ""}" style="width:95%">
             </th>
-            <th style="text-align:center">
+            <th>
               <div style="display:flex; gap:4px; justify-content:center">
-                <input id="flt-atl-from" type="date" value="${filters.atlFrom ?? ""}" style="text-align:center">
-                <input id="flt-atl-to" type="date" value="${filters.atlTo ?? ""}" style="text-align:center">
+                <input id="flt-atl-from" type="date" value="${filters.atlFrom ?? ""}">
+                <input id="flt-atl-to" type="date" value="${filters.atlTo ?? ""}">
               </div>
             </th>
-            <th style="text-align:center">
-              <button id="flt-clear">Limpar filtros</button>
-            </th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
           ${listView.map(v => `
             <tr data-id="${v.id}" data-nup="${v.nup}">
-              <td style="text-align:center">${v.nup}</td>
-              <td style="text-align:center">${v.tipo}</td>
-              <td style="text-align:center">
-                <div style="display:flex; justify-content:center">
-                  <select class="status-select">
-                    ${STATUS.map(s => `<option ${s === v.status ? "selected" : ""}>${s}</option>`).join("")}
-                  </select>
-                </div>
+              <td>${v.nup}</td>
+              <td>${v.tipo}</td>
+              <td>
+                <select class="status-select">
+                  ${STATUS.map(s => `<option ${s === v.status ? "selected" : ""}>${s}</option>`).join("")}
+                </select>
               </td>
-              <td style="text-align:center">${v.entrada || ""}</td>
-              <td style="text-align:center">${v.prazoDisplay}</td>
-              <td class="small" style="text-align:center">${v.modificado || ""}</td>
-              <td class="small" style="text-align:center">${v.atualizadoStr}</td>
-              <td style="text-align:center">
-                <div style="display:flex; justify-content:center">
-                  <button class="btn-historico">Histórico</button>
-                </div>
-              </td>
+              <td>${v.entrada || ""}</td>
+              <td>${v.prazoDisplay}</td>
+              <td class="small">${v.modificado || ""}</td>
+              <td class="small">${v.atualizadoStr}</td>
+              <td><button class="btn-historico">Histórico</button></td>
             </tr>
           `).join("")}
         </tbody>
@@ -363,32 +309,68 @@ function viewTabela(listView, sort, filters) {
   `;
 }
 
-// ========= Formulário (uma linha após o título; responsivo por CSS) =========
+// ========= Render do painel de Histórico (tabela fixa) =========
+
+function viewHistorico(title, hist) {
+  const rows = (hist || []).map(h => {
+    const autor = h.changed_by_email || h.changed_by || "(desconhecido)";
+    const quando = new Date(h.changed_at).toLocaleString();
+    const de = h.old_status ?? "(criação)";
+    const para = h.new_status ?? "(sem status)";
+    return `<tr>
+      <td>${quando}</td>
+      <td>${de}</td>
+      <td>${para}</td>
+      <td>${autor}</td>
+    </tr>`;
+  }).join("");
+  return `
+    <h3 class="pane-title">${title}</h3>
+    <div class="hist-scroll pane-body">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Data/Hora</th>
+            <th>De</th>
+            <th>Para</th>
+            <th>Por</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows || `<tr><td colspan="4">Sem histórico.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+// ========= Formulário (uma linha; ocupa 100%) =========
 
 function viewFormulario() {
   return `
-    <div class="card">
+    <div class="card proc-form-card">
       <h3>Insira o NUP do Processo</h3>
-
-      <div id="form-row" class="form-row">
+      <div class="proc-form-row">
         <!-- NUP -->
-        <div style="min-width:260px">
+        <div style="min-width:260px; flex:1 1 260px">
           <label>NUP</label>
           <input id="f-nup" inputmode="numeric" autocomplete="off" placeholder="00000.000000/0000-00" />
         </div>
 
         <!-- Buscar -->
         <div style="flex:0 0 auto">
+          <label>&nbsp;</label>
           <button id="btn-buscar">Buscar</button>
         </div>
 
         <!-- Limpar -->
         <div style="flex:0 0 auto">
+          <label>&nbsp;</label>
           <button id="btn-limpar" type="button">Limpar</button>
         </div>
 
         <!-- Tipo -->
-        <div style="min-width:200px">
+        <div style="min-width:180px; flex:1 1 180px">
           <label>Tipo</label>
           <select id="f-tipo" disabled>
             <option value="" disabled selected hidden>-- selecione --</option>
@@ -397,13 +379,13 @@ function viewFormulario() {
         </div>
 
         <!-- 1ª Entrada Regional -->
-        <div style="min-width:180px">
+        <div style="min-width:160px; flex:1 1 160px">
           <label>1ª Entrada Regional</label>
           <input id="f-entrada" type="date" disabled />
         </div>
 
         <!-- Status -->
-        <div style="min-width:220px">
+        <div style="min-width:200px; flex:1 1 200px">
           <label>Status</label>
           <select id="f-status" disabled>
             <option value="" disabled selected hidden>-- selecione --</option>
@@ -413,16 +395,19 @@ function viewFormulario() {
 
         <!-- Salvar -->
         <div style="flex:0 0 auto">
+          <label>&nbsp;</label>
           <button id="btn-salvar" disabled>Salvar</button>
         </div>
 
         <!-- Histórico -->
         <div style="flex:0 0 auto">
+          <label>&nbsp;</label>
           <button id="btn-historico-form" disabled>Histórico</button>
         </div>
 
         <!-- Excluir -->
         <div style="flex:0 0 auto">
+          <label>&nbsp;</label>
           <button id="btn-excluir" disabled>Excluir</button>
         </div>
       </div>
@@ -432,15 +417,18 @@ function viewFormulario() {
   `;
 }
 
-// ========= Comportamento =========
+// ========= Comportamento: bind da lista (inclui click da linha) =========
 
-function bindTabela(container, refresh) {
+function bindTabela(container, refresh, onPickRow) {
   container.querySelectorAll("tr[data-id]").forEach(tr => {
     const id = tr.getAttribute("data-id");
     const nup = tr.getAttribute("data-nup");
     const select = tr.querySelector(".status-select");
+    const btnHist = tr.querySelector(".btn-historico");
 
-    select.addEventListener("change", async () => {
+    // Alteração de status direto na lista
+    select.addEventListener("change", async (ev) => {
+      ev.stopPropagation();
       const newStatus = select.value;
       try {
         await updateStatus(id, newStatus);
@@ -450,10 +438,29 @@ function bindTabela(container, refresh) {
       }
     });
 
-    tr.querySelector(".btn-historico").addEventListener("click", async () => {
+    // Botão Histórico: mostra no painel da esquerda
+    btnHist.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
       try {
         const hist = await getHistorico(id);
-        showHistoryModal(`Histórico — ${nup}`, hist);
+        const histPane = document.getElementById("hist-pane");
+        histPane.innerHTML = viewHistorico(`Histórico — ${nup}`, hist);
+      } catch (e) {
+        alert("Erro ao carregar histórico: " + e.message);
+      }
+    });
+
+    // Clique na linha: seleciona processo no formulário + histórico
+    tr.addEventListener("click", async () => {
+      onPickRow(id); // define no formulário
+      try {
+        // destacar linha selecionada
+        container.querySelectorAll("tbody tr").forEach(row => row.classList.remove("row-selected"));
+        tr.classList.add("row-selected");
+
+        const hist = await getHistorico(id);
+        const histPane = document.getElementById("hist-pane");
+        histPane.innerHTML = viewHistorico(`Histórico — ${nup}`, hist);
       } catch (e) {
         alert("Erro ao carregar histórico: " + e.message);
       }
@@ -461,25 +468,38 @@ function bindTabela(container, refresh) {
   });
 }
 
+// ========= Módulo =========
+
 export default {
   id: "processos",
   title: "Processos",
   route: "#/processos",
   async view(container) {
-    // injeta CSS responsivo (uma vez)
-    ensureResponsiveCSS();
+    // aplica CSS de layout
+    ensureLayoutCSS();
 
+    // Layout base do módulo: formulário em cima; duas metades abaixo
     container.innerHTML = `
-      <div class="container">
+      <div class="container proc-mod">
         ${viewFormulario()}
-        <div class="card">
-          <h3>Lista de processos</h3>
-          <div id="grid">Carregando...</div>
+        <div class="proc-split">
+          <div class="card proc-pane hist-pane" id="hist-pane">
+            <h3 class="pane-title">Histórico</h3>
+            <div class="pane-body hist-scroll">
+              <table class="table">
+                <thead><tr><th>Data/Hora</th><th>De</th><th>Para</th><th>Por</th></tr></thead>
+                <tbody><tr><td colspan="4">Selecione um processo para ver o histórico.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card proc-pane grid-pane" id="grid-pane">
+            <div id="grid">Carregando...</div>
+          </div>
         </div>
       </div>
     `;
 
-    // ------------ refs do formulário ------------
+    // ------------ refs ------------
     const el = (sel) => container.querySelector(sel);
     const $nup     = el("#f-nup");
     const $tipo    = el("#f-tipo");
@@ -491,7 +511,8 @@ export default {
     const $excluir = el("#btn-excluir");
     const $histFrm = el("#btn-historico-form");
     const $msg     = el("#msg-novo");
-    const grid     = el("#grid");
+    const gridWrap = el("#grid");
+    const histPane = el("#hist-pane");
 
     // ------------ estado ------------
     let currentAction = null;   // 'update' | 'create' | null
@@ -500,9 +521,9 @@ export default {
     let pendingNup = "";
     let currentNupMasked = "";
 
-    let allList = [];          // dados crus do banco
+    let allList = [];          // dados crus
     let prazosMap = new Map(); // id -> "YYYY-MM-DD"
-    let viewData = [];         // dados para a grade (derivados)
+    let viewData = [];         // dados de visualização
 
     const filters = {
       nup: "", tipo: "", status: "",
@@ -512,7 +533,7 @@ export default {
     };
     const sort = { key: "atualizado", dir: "desc" }; // padrão: mais recente primeiro
 
-    // ------------ máscaras e helpers do form ------------
+    // ------------ helpers do form ------------
     $nup.addEventListener("input", () => {
       const digits = onlyDigits17($nup.value);
       $nup.value = maskNUP(digits);
@@ -548,6 +569,8 @@ export default {
       $excluir.disabled = true;
       $histFrm.disabled = true;
       currentAction = "create";
+      // limpa histórico
+      histPane.innerHTML = viewHistorico("Histórico", []);
     }
 
     function setUpdateMode(row) {
@@ -564,7 +587,7 @@ export default {
       $entrada.disabled = true;
       $status.disabled = false;
 
-      $salvar.disabled = true; // habilita só se mudar o status
+      $salvar.disabled = true;
       $excluir.disabled = false;
       $histFrm.disabled = false;
       $msg.textContent = "Processo encontrado. Altere o Status se necessário ou consulte o Histórico.";
@@ -593,7 +616,7 @@ export default {
       }
     });
 
-    // ------------ grid: montagem dos dados de visualização ------------
+    // ------------ montagem dos dados de visualização ------------
     function buildViewData() {
       viewData = allList.map(r => {
         const prazoStr = SOBRESTADOS.has(r.status) ? "Sobrestado" : (prazosMap.get(r.id) || "");
@@ -665,10 +688,10 @@ export default {
     }
 
     function attachFilterSortHandlers() {
-      const qs = (s) => grid.querySelector(s);
+      const qs = (s) => gridWrap.querySelector(s);
 
       // Ordenação por clique no cabeçalho
-      grid.querySelectorAll("th[data-sort-key]").forEach(th => {
+      gridWrap.querySelectorAll("th[data-sort-key]").forEach(th => {
         th.addEventListener("click", () => {
           const key = th.getAttribute("data-sort-key");
           if (sort.key === key) {
@@ -709,15 +732,29 @@ export default {
       }
     }
 
-    // ------------ renderização da grade ------------
+    // ------------ render da grade à direita ------------
     function renderGrid() {
       const listView = applyFiltersSort();
-      grid.innerHTML = viewTabela(listView, sort, filters);
-      bindTabela(grid, refresh);
+      gridWrap.innerHTML = viewTabela(listView, sort, filters, STATUS, TIPOS);
+      bindTabela(gridWrap, refresh, onPickRowFromList);
       attachFilterSortHandlers();
+
+      // Reaplica destaque na linha atualmente selecionada (se houver)
+      if (currentRowId) {
+        const tr = gridWrap.querySelector(`tr[data-id="${currentRowId}"]`);
+        if (tr) tr.classList.add("row-selected");
+      }
     }
 
-    // ------------ fluxo de busca/salvar/excluir do formulário ------------
+    // ------------ preencher formulário a partir do clique na lista ------------
+    function onPickRowFromList(id) {
+      const row = allList.find(r => String(r.id) === String(id));
+      if (!row) return;
+      setUpdateMode(row);
+      $nup.value = row.nup; // mantém NUP visível coerente ao selecionar pela lista
+    }
+
+    // ------------ fluxo do formulário ------------
     $buscar.addEventListener("click", async () => {
       const digits = onlyDigits17($nup.value);
       if (digits.length !== 17) {
@@ -727,17 +764,29 @@ export default {
       }
       const nupMasked = maskNUP(digits);
 
-      resetForm(false);
+      // mantém NUP visível durante a busca
       $msg.textContent = "Buscando...";
 
       try {
         const row = await getProcessoByNup(nupMasked);
         if (row) {
           setUpdateMode(row);
+
+          // destaca na lista e carrega histórico à esquerda
+          currentRowId = row.id;
+          renderGrid(); // para destacar a linha
+          const hist = await getHistorico(row.id);
+          histPane.innerHTML = viewHistorico(`Histórico — ${row.nup}`, hist);
         } else {
+          // pergunta: criar?
           perguntaCriar((decisao) => {
-            if (decisao) setCreateMode(nupMasked);
-            else { resetForm(true); $nup.focus(); }
+            if (decisao) {
+              setCreateMode(nupMasked);
+            } else {
+              resetForm(true);
+              histPane.innerHTML = viewHistorico("Histórico", []);
+              $nup.focus();
+            }
           });
         }
       } catch (e) {
@@ -747,6 +796,7 @@ export default {
 
     $limpar.addEventListener("click", () => {
       resetForm(true);
+      histPane.innerHTML = viewHistorico("Histórico", []);
       $msg.textContent = "NUP limpo.";
       $nup.focus();
     });
@@ -763,6 +813,9 @@ export default {
           originalStatus = $status.value;
           $salvar.disabled = true;
           await refresh();
+          // atualiza histórico visível
+          const hist = await getHistorico(currentRowId);
+          histPane.innerHTML = viewHistorico(`Histórico — ${currentNupMasked}`, hist);
         } else if (currentAction === "create") {
           if (!validarObrigatoriosParaCriar()) return;
 
@@ -776,8 +829,13 @@ export default {
           await createProcesso(payload);
           $msg.textContent = "Processo criado com sucesso.";
           const novo = await getProcessoByNup(pendingNup);
-          if (novo) setUpdateMode(novo);
-          await refresh();
+          if (novo) {
+            setUpdateMode(novo);
+            currentRowId = novo.id;
+            await refresh();
+            const hist = await getHistorico(novo.id);
+            histPane.innerHTML = viewHistorico(`Histórico — ${novo.nup}`, hist);
+          }
         } else {
           alert("Use o botão Buscar antes de salvar.");
         }
@@ -798,18 +856,20 @@ export default {
         await deleteProcesso(currentRowId);
         $msg.textContent = "Processo excluído com sucesso.";
         resetForm(true);
-        $nup.focus();
+        histPane.innerHTML = viewHistorico("Histórico", []);
         await refresh();
+        $nup.focus();
       } catch (e) {
         alert("Erro ao excluir: " + e.message);
       }
     });
 
+    // Histórico (botão do formulário) – mostra na metade esquerda
     $histFrm.addEventListener("click", async () => {
       if (currentAction !== "update" || !currentRowId) return;
       try {
         const hist = await getHistorico(currentRowId);
-        showHistoryModal(`Histórico — ${currentNupMasked}`, hist);
+        histPane.innerHTML = viewHistorico(`Histórico — ${currentNupMasked}`, hist);
       } catch (e) {
         alert("Erro ao carregar histórico: " + e.message);
       }
@@ -817,7 +877,7 @@ export default {
 
     // ------------ carregar + atualizar grade ------------
     const refresh = async () => {
-      grid.textContent = "Carregando...";
+      gridWrap.innerHTML = "Carregando...";
       try {
         allList = await listProcessos();
         const ids = allList.map(r => r.id);
@@ -826,10 +886,11 @@ export default {
         buildViewData();
         renderGrid();
       } catch (e) {
-        grid.innerHTML = `<p>Erro ao carregar: ${e.message}</p>`;
+        gridWrap.innerHTML = `<p>Erro ao carregar: ${e.message}</p>`;
       }
     };
 
+    // Estado inicial
     resetForm();
     await refresh();
   },
