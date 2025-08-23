@@ -124,7 +124,8 @@ const DIA_MS = 24 * 60 * 60 * 1000;
  * Retorna um Map<processo_id, 'YYYY-MM-DD'> (string) ou '' se não puder calcular.
  */
 function calcularPrazosMapa(processos, historicos) {
-  const saidaSobMap = new Map(); // processo_id -> timestamp da última saída de Sobrestado
+  // processo_id -> timestamp da última saída de Sobrestado
+  const saidaSobMap = new Map();
   for (const h of historicos) {
     const saiuDeSob =
       SOBRESTADOS.has(h.old_status) && !SOBRESTADOS.has(h.new_status);
@@ -227,13 +228,8 @@ function arrowFor(col, sort) {
   if (sort.key !== col) return "";
   return sort.dir === "asc" ? " ▲" : " ▼";
 }
-
-function norm(str) {
-  return (str || "").toString().toLowerCase();
-}
-
+function norm(str) { return (str || "").toString().toLowerCase(); }
 function parseYmd(s) {
-  // "YYYY-MM-DD" -> timestamp (início do dia local)
   if (!s) return null;
   const d = new Date(s);
   if (isNaN(d)) return null;
@@ -244,7 +240,6 @@ function parseYmd(s) {
 // ========= Tabela (com filtros + ordenação + células centralizadas) =========
 
 function viewTabela(listView, sort, filters) {
-  // Cabeçalho (com clique para ordenar) + linha de filtros
   const th = (key, label) =>
     `<th data-sort-key="${key}" style="text-align:center; cursor:pointer">${label}${arrowFor(key, sort)}</th>`;
 
@@ -330,49 +325,71 @@ function viewTabela(listView, sort, filters) {
   `;
 }
 
-// ========= Formulário =========
+// ========= Formulário (UMA LINHA após o título, na ordem solicitada) =========
 
 function viewFormulario() {
   return `
     <div class="card">
       <h3>Insira o NUP do Processo</h3>
 
-      <div class="row" style="align-items:flex-end">
-        <div>
+      <div id="form-row" style="
+        display:flex; align-items:flex-end; gap:8px; flex-wrap:nowrap;
+        overflow:auto; padding-bottom:4px
+      ">
+        <!-- NUP -->
+        <div style="min-width:260px">
           <label>NUP</label>
           <input id="f-nup" inputmode="numeric" autocomplete="off" placeholder="00000.000000/0000-00" />
         </div>
-        <div style="flex:0 0 auto; display:flex; gap:8px">
+
+        <!-- Buscar -->
+        <div style="flex:0 0 auto">
           <button id="btn-buscar">Buscar</button>
+        </div>
+
+        <!-- Limpar -->
+        <div style="flex:0 0 auto">
           <button id="btn-limpar" type="button">Limpar</button>
         </div>
-      </div>
 
-      <div class="row" style="margin-top:8px">
-        <div>
+        <!-- Tipo -->
+        <div style="min-width:200px">
           <label>Tipo</label>
           <select id="f-tipo" disabled>
             <option value="" disabled selected hidden>-- selecione --</option>
             ${TIPOS.map(t => `<option value="${t}">${t}</option>`).join("")}
           </select>
         </div>
-        <div>
+
+        <!-- 1ª Entrada Regional -->
+        <div style="min-width:180px">
           <label>1ª Entrada Regional</label>
           <input id="f-entrada" type="date" disabled />
         </div>
-        <div>
+
+        <!-- Status -->
+        <div style="min-width:220px">
           <label>Status</label>
           <select id="f-status" disabled>
             <option value="" disabled selected hidden>-- selecione --</option>
             ${STATUS.map(s => `<option value="${s}">${s}</option>`).join("")}
           </select>
         </div>
-      </div>
 
-      <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap">
-        <button id="btn-salvar" disabled>Salvar</button>
-        <button id="btn-excluir" disabled>Excluir</button>
-        <button id="btn-historico-form" disabled>Histórico</button>
+        <!-- Salvar -->
+        <div style="flex:0 0 auto">
+          <button id="btn-salvar" disabled>Salvar</button>
+        </div>
+
+        <!-- Histórico -->
+        <div style="flex:0 0 auto">
+          <button id="btn-historico-form" disabled>Histórico</button>
+        </div>
+
+        <!-- Excluir -->
+        <div style="flex:0 0 auto">
+          <button id="btn-excluir" disabled>Excluir</button>
+        </div>
       </div>
 
       <div id="msg-novo" class="small" style="margin-top:8px"></div>
@@ -447,7 +464,7 @@ export default {
 
     let allList = [];          // dados crus do banco
     let prazosMap = new Map(); // id -> "YYYY-MM-DD"
-    let viewData = [];         // dados para a grade, já com campos derivados
+    let viewData = [];         // dados para a grade (derivados)
 
     const filters = {
       nup: "", tipo: "", status: "",
@@ -509,7 +526,7 @@ export default {
       $entrada.disabled = true;
       $status.disabled = false;
 
-      $salvar.disabled = true;
+      $salvar.disabled = true; // habilita só se mudar o status
       $excluir.disabled = false;
       $histFrm.disabled = false;
       $msg.textContent = "Processo encontrado. Altere o Status se necessário ou consulte o Histórico.";
@@ -622,7 +639,7 @@ export default {
             sort.key = key;
             sort.dir = "asc";
           }
-          renderGrid(); // re-render com nova ordenação
+          renderGrid();
         });
       });
 
@@ -658,8 +675,8 @@ export default {
     function renderGrid() {
       const listView = applyFiltersSort();
       grid.innerHTML = viewTabela(listView, sort, filters);
-      bindTabela(grid, refresh);           // ações por linha
-      attachFilterSortHandlers();          // filtros e ordenação
+      bindTabela(grid, refresh);
+      attachFilterSortHandlers();
     }
 
     // ------------ fluxo de busca/salvar/excluir do formulário ------------
