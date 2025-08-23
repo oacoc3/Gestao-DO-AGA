@@ -15,11 +15,11 @@
   padding-right: 16px;
 }
 
-/* componentes internos usam toda a faixa disponível */
+/* componentes internos ocupam a faixa disponível */
 #app .card { width: 100%; }
 #app .table { width: 100%; table-layout: fixed; }
 
-/* evita que inputs/selects “estourem” célula */
+/* evita que inputs/selects “estourem” células da tabela */
 #app table input,
 #app table select,
 #app table button {
