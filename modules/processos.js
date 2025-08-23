@@ -153,7 +153,7 @@ function ensureLayoutCSS() {
     .hist-pane { flex:0 0 35%; }
     .grid-pane { flex:1 1 65%; }
     .pane-title { margin:0 0 8px 0; }
-    .pane-body { flex:1 1 auto; min-height:0; overflow:hidden; display:flex; } /* << importante p/ rolagem interna */
+    .pane-body { flex:1 1 auto; min-height:0; overflow:hidden; display:flex; } /* permite rolagem interna */
 
     /* =======================
        LISTA DE PROCESSOS (GRID)
@@ -165,7 +165,7 @@ function ensureLayoutCSS() {
       --w-prazo: clamp(8ch, 10ch, 12ch);
     }
 
-    /* #grid ocupa todo o espaço disponível da pane-body */
+    /* #grid ocupa todo o espaço da pane-body */
     #grid{ flex:1 1 auto; min-height:0; display:flex; }
 
     /* roletador vertical interno (sem height:100%; usa flex) */
@@ -325,7 +325,7 @@ function viewHistorico(title, hist) {
   `;
   const rows = (hist || []).map(h => {
     const autor = h.changed_by_email || h.changed_by || "(desconhecido)";
-    const quando = new Date(h.changed_at).toLocaleString();
+    the const quando = new Date(h.changed_at).toLocaleString();
     const de = h.old_status ?? "(criação)";
     const para = h.new_status ?? "(sem status)";
     return `<div class="hist-row"><div>${quando}</div><div>${de}</div><div>${para}</div><div>${autor}</div></div>`;
@@ -473,6 +473,9 @@ export default {
     let prazosMap = new Map();
     let viewData = [];
 
+    // NOVO: id "pinned" para ir ao topo após busca
+    let pinnedId = null;
+
     const sort = { key:"atualizado", dir:"desc" };
 
     // alturas (evita rolagem da página)
@@ -491,6 +494,7 @@ export default {
       $tipo.disabled = true; $entrada.disabled = true; $status.disabled = true;
       $salvar.disabled = true; $excluir.disabled = true;
       currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
+      pinnedId = null; // limpa o pino ao resetar formulário
     }
     function setCreateMode(nupMasked) {
       pendingNup = nupMasked; currentNupMasked = nupMasked;
@@ -556,6 +560,16 @@ export default {
       };
       const arr = viewData.slice();
       arr.sort((a,b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * dir);
+
+      // NOVO: se houver um "pinnedId", move essa linha para o topo
+      if (pinnedId != null) {
+        const idx = arr.findIndex(v => String(v.id) === String(pinnedId));
+        if (idx > 0) {
+          const [item] = arr.splice(idx, 1);
+          arr.unshift(item);
+        }
+      }
+
       return arr;
     }
     function renderGrid() {
@@ -587,6 +601,7 @@ export default {
       setUpdateMode(row);
       $nup.value = row.nup;
       currentRowId = row.id;
+      // (não “pina” ao clicar na lista; só ao buscar)
     }
 
     // formulário
@@ -599,7 +614,9 @@ export default {
       try {
         const row = await getProcessoByNup(nupMasked);
         if (row) {
-          setUpdateMode(row); currentRowId = row.id;
+          setUpdateMode(row); 
+          currentRowId = row.id;
+          pinnedId = row.id; // << NOVO: pino para ir ao topo
           renderGrid();
           const hist = await getHistorico(row.id);
           histPane.innerHTML = viewHistorico(`Histórico — ${row.nup}`, hist);
@@ -613,7 +630,11 @@ export default {
     };
     $buscar.addEventListener("click", buscar);
     $limpar.addEventListener("click", () => {
-      resetForm(true); histPane.innerHTML = viewHistorico("Histórico", []); $msg.textContent = "NUP limpo."; $nup.focus();
+      resetForm(true); 
+      histPane.innerHTML = viewHistorico("Histórico", []); 
+      renderGrid(); // re-render sem o pino
+      $msg.textContent = "NUP limpo."; 
+      $nup.focus();
     });
     $salvar.addEventListener("click", async () => {
       try {
