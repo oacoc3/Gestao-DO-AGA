@@ -1,7 +1,6 @@
 // modules/auth.js
-// Fluxos: login por e-mail/senha, "esqueci minha senha" (recovery) e
-// "troca obrigatória de senha" (must_change_password).
-//
+// Fluxos: login por e-mail/senha, "esqueci minha senha" (recovery)
+// e tratamento simples para "primeiro acesso".
 // Siglas:
 // - JWT: JSON Web Token (token do usuário logado)
 // - RLS: Row Level Security (segurança no banco)
@@ -74,17 +73,28 @@ export default {
       bindLogin();
     };
 
-    const renderForceChangePassword = () => {
-      $area.innerHTML = `
-        <p>Por segurança, defina uma nova senha para continuar.</p>
-        <div class="auth-row">
-          <div><label>Nova senha</label><input id="np1" type="password" autocomplete="new-password" /></div>
-          <div><label>Confirmar nova senha</label><input id="np2" type="password" autocomplete="new-password" /></div>
-          <div><label>&nbsp;</label><button id="btn-setpass">Definir nova senha</button></div>
-        </div>
-      `;
-      $msg.textContent = "A senha precisa atender sua política interna (tamanho/complexidade).";
-      bindSetPassword();
+    // Envia um e-mail para definir/redefinir senha e orienta o usuário
+    const renderForceChangePassword = async () => {
+      $area.innerHTML = `<p>Estamos enviando um e-mail para você definir sua senha...</p>`;
+      try {
+        const { data } = await supabase.auth.getSession();
+        const email = data?.session?.user?.email;
+        if (!email) throw new Error("Sessão inválida.");
+
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${location.origin}/#/entrar`
+        });
+        if (error) throw error;
+
+        $area.innerHTML = `
+          <p>Enviamos um e-mail para <strong>${email}</strong>.</p>
+          <p>Abra o e-mail e clique no link “Definir/Redefinir senha”. Depois é só voltar e entrar normalmente.</p>
+        `;
+        $msg.textContent = "";
+      } catch (e) {
+        $area.innerHTML = "";
+        $msg.textContent = "Não foi possível enviar o e-mail de definição de senha: " + e.message;
+      }
     };
 
     const renderLogged = async () => {
@@ -110,22 +120,41 @@ export default {
     function bindLogin() {
       const $email = container.querySelector("#lg-email");
       const $pass  = container.querySelector("#lg-pass");
+
       container.querySelector("#btn-entrar").onclick = async () => {
         $msg.textContent = "Autenticando...";
-        const { error } = await supabase.auth.signInWithPassword({ email: $email.value, password: $pass.value });
+        const { error } = await supabase.auth.signInWithPassword({
+          email: $email.value,
+          password: $pass.value
+        });
         if (error) { $msg.textContent = "Falha no login: " + error.message; return; }
 
         try {
+          const sess = await getSession();
+          const user = sess?.user;
           const prof = await getMyProfile();
+
           if (prof?.must_change_password) {
-            renderForceChangePassword();
-          } else {
-            location.hash = "#/processos";
+            // Tentativa simples: limpar a flag para não repetir no próximo login
+            try {
+              await supabase.from("profiles")
+                .update({ must_change_password: false })
+                .eq("id", user.id);
+              // Mesmo se falhar, seguimos para o fluxo do e-mail
+            } catch (_) {}
+
+            // Envia e-mail de definição (caso ainda não tenha definido)
+            await renderForceChangePassword();
+            return;
           }
+
+          // Perfil OK → segue para a aplicação
+          location.hash = "#/processos";
         } catch (e) {
           $msg.textContent = "Erro ao carregar perfil: " + e.message;
         }
       };
+
       container.querySelector("#btn-recovery").onclick = async () => {
         if (!$email.value) { $msg.textContent = "Informe seu e-mail e clique novamente."; return; }
         $msg.textContent = "Enviando e-mail de recuperação...";
@@ -137,40 +166,12 @@ export default {
       };
     }
 
-    function bindSetPassword() {
-      const $p1 = container.querySelector("#np1");
-      const $p2 = container.querySelector("#np2");
-      container.querySelector("#btn-setpass").onclick = async () => {
-        if (!$p1.value || $p1.value !== $p2.value) { $msg.textContent = "As senhas não coincidem."; return; }
-        $msg.textContent = "Atualizando senha...";
-        const { error } = await supabase.auth.updateUser({ password: $p1.value });
-        if (error) { $msg.textContent = "Erro ao atualizar senha: " + error.message; return; }
-
-        // Desliga a flag must_change_password (política/trigger permite apenas isso)
-        const sess = await getSession();
-        if (sess?.user?.id) {
-          const { error: e2 } = await supabase
-            .from("profiles")
-            .update({ must_change_password: false })
-            .eq("id", sess.user.id);
-          if (e2) { $msg.textContent = "Senha atualizada, mas houve erro ao finalizar: " + e2.message; return; }
-        }
-        $msg.textContent = "Senha atualizada. Redirecionando...";
-        setTimeout(() => (location.hash = "#/processos"), 600);
-      };
-    }
-
     // Roteamento do módulo: decide qual tela mostrar
     try {
       const sess = await getSession();
       if (!sess) { renderLogin(); return; }
 
-      // Se veio de um link de recuperação, o SDK já cria a sessão.
-      // Verifica se precisa trocar a senha.
-      const prof = await getMyProfile();
-      if (prof?.must_change_password) { renderForceChangePassword(); return; }
-
-      // Senão, já mostra o "logado"
+      // Se já está logado, mostra resumo e botão "Sair"
       await renderLogged();
     } catch (e) {
       $msg.textContent = "Erro: " + e.message;
