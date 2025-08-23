@@ -16,10 +16,12 @@ const STATUS = [
 
 // ========= Utilitários: máscara/validação do NUP =========
 
+/** Mantém apenas dígitos e limita a 17 algarismos */
 function onlyDigits17(value) {
   return (value || "").replace(/\D/g, "").slice(0, 17);
 }
 
+/** Aplica o formato 00000.000000/0000-00 sobre até 17 dígitos */
 function maskNUP(digits) {
   const d = onlyDigits17(digits);
   const len = d.length;
@@ -33,10 +35,6 @@ function maskNUP(digits) {
     d.slice(11, 15) + "-" +
     d.slice(15, 17)
   );
-}
-
-function isFullNUP(value) {
-  return onlyDigits17(value).length === 17;
 }
 
 // ========= Acesso ao banco =========
@@ -101,9 +99,73 @@ async function getHistorico(processoId) {
   return data;
 }
 
-// ========= Tabela (inalterada visualmente) =========
+/** Busca histórico de vários processos de uma vez (para calcular prazos) */
+async function getHistoricoBatch(ids) {
+  if (!ids.length) return [];
+  const { data, error } = await supabase
+    .from("status_history")
+    .select("processo_id, old_status, new_status, changed_at")
+    .in("processo_id", ids);
+  if (error) throw error;
+  return data;
+}
 
-function viewTabela(list) {
+// ========= Cálculo do "Prazo Regional" (na SPA, não grava no banco) =========
+
+const SOBRESTADOS = new Set(["Sobrestado Técnico", "Sobrestado Documental"]);
+const DIA_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Para cada processo, define a "data base" do prazo:
+ * - por padrão: 1ª Entrada Regional
+ * - se houve saída de Sobrestado (old_status ∈ SOBRESTADOS e new_status ∉ SOBRESTADOS),
+ *   usa a data da ÚLTIMA saída como nova base.
+ * O "Prazo Regional" = data base + 60 dias corridos.
+ * Retorna um Map<processo_id, 'YYYY-MM-DD'> (string) ou '' se não puder calcular.
+ */
+function calcularPrazosMapa(processos, historicos) {
+  // Mapa: processo_id -> timestamp da última "saída de Sobrestado"
+  const saidaSobMap = new Map();
+  for (const h of historicos) {
+    const saiuDeSob =
+      SOBRESTADOS.has(h.old_status) && !SOBRESTADOS.has(h.new_status);
+    if (saiuDeSob) {
+      const t = new Date(h.changed_at).getTime();
+      const prev = saidaSobMap.get(h.processo_id);
+      if (!prev || t > prev) saidaSobMap.set(h.processo_id, t);
+    }
+  }
+
+  // Calcula prazos
+  const prazos = new Map();
+  for (const p of processos) {
+    let base = null;
+
+    // 1ª Entrada Regional (se existir)
+    if (p.entrada_regional) {
+      base = new Date(p.entrada_regional);
+    }
+
+    // Saída mais recente de Sobrestado (se existir e for depois da entrada)
+    const tSaida = saidaSobMap.get(p.id);
+    if (tSaida) {
+      const dtSaida = new Date(tSaida);
+      if (!base || dtSaida > base) base = dtSaida;
+    }
+
+    if (base) {
+      const prazo = new Date(base.getTime() + 60 * DIA_MS);
+      prazos.set(p.id, prazo.toISOString().slice(0, 10)); // YYYY-MM-DD
+    } else {
+      prazos.set(p.id, ""); // sem como calcular
+    }
+  }
+  return prazos;
+}
+
+// ========= Tabela (ajustada: remove "Saída Regional" e renomeia "Prazo Regional") =========
+
+function viewTabela(list, prazosMap) {
   return `
     <table class="table">
       <thead>
@@ -112,8 +174,7 @@ function viewTabela(list) {
           <th>Tipo</th>
           <th>Status</th>
           <th>1ª Entrada Regional</th>
-          <th>Prazo Saída Regional</th>
-          <th>Saída Regional</th>
+          <th>Prazo Regional</th>
           <th class="right">Modificado por</th>
           <th>Atualizado em</th>
           <th>Ações</th>
@@ -130,8 +191,7 @@ function viewTabela(list) {
               </select>
             </td>
             <td>${row.entrada_regional ?? ""}</td>
-            <td>${row.prazo_saida_regional ?? ""}</td>
-            <td>${row.saida_regional ?? ""}</td>
+            <td>${prazosMap.get(row.id) ?? ""}</td>
             <td class="right small">${row.modificado_por ?? ""}</td>
             <td class="small">${new Date(row.updated_at).toLocaleString()}</td>
             <td><button class="btn-historico">Histórico</button></td>
@@ -142,7 +202,7 @@ function viewTabela(list) {
   `;
 }
 
-// ========= Formulário (sem mudança visual além do já combinado) =========
+// ========= Formulário (inalterado nas últimas regras) =========
 
 function viewFormulario() {
   return `
@@ -209,7 +269,6 @@ function bindTabela(container, refresh) {
     tr.querySelector(".btn-historico").addEventListener("click", async () => {
       try {
         const hist = await getHistorico(id);
-        // Exibe data, transição e autor (e-mail se disponível; senão UUID)
         alert(hist.length
           ? hist.map(h => {
               const autor = h.changed_by_email || h.changed_by || "(desconhecido)";
@@ -429,7 +488,13 @@ export default {
       grid.textContent = "Carregando...";
       try {
         const list = await listProcessos();
-        grid.innerHTML = viewTabela(list);
+
+        // Calcula "Prazo Regional" para todos os itens, usando histórico em lote
+        const ids = list.map(r => r.id);
+        const historicos = await getHistoricoBatch(ids);
+        const prazosMap = calcularPrazosMapa(list, historicos);
+
+        grid.innerHTML = viewTabela(list, prazosMap);
         bindTabela(container, refresh);
       } catch (e) {
         grid.innerHTML = `<p>Erro ao carregar: ${e.message}</p>`;
