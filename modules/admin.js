@@ -1,6 +1,6 @@
 // modules/admin.js
-// CRUD de usuários via Netlify Function protegida.
-// Chamadas levam Authorization: Bearer <access_token> do Supabase.
+// Administração de usuários via Netlify Function protegida.
+// Ao criar usuário: NÃO define senha e já envia e-mail de "Definir senha".
 //
 // Siglas:
 // - JWT: JSON Web Token (contém app_metadata.perfil do usuário)
@@ -83,7 +83,8 @@ export default {
                 <label>Perfil</label>
                 <select id="pf">${PERFIS.map(p=>`<option value="${p}">${p}</option>`).join("")}</select>
               </div>
-              <div><label>Senha inicial (opcional)</label><input id="pw" type="password" placeholder="Se vazio, enviaremos link de recuperação" /></div>
+              <!-- Campo de senha não é usado no fluxo simples; mantido para futuro, se quiser -->
+              <div><label>Senha inicial (ignorada)</label><input id="pw" type="password" placeholder="Fluxo envia e-mail para definir senha" disabled /></div>
               <div><label>&nbsp;</label><button id="btn-save">Salvar</button></div>
               <div><label>&nbsp;</label><button id="btn-clear" type="button">Limpar</button></div>
             </div>
@@ -123,7 +124,7 @@ export default {
     const $fn = container.querySelector("#fn");
     const $em = container.querySelector("#em");
     const $pf = container.querySelector("#pf");
-    const $pw = container.querySelector("#pw");
+    const $pw = container.querySelector("#pw"); // ignorado
 
     let editingId = null;
 
@@ -226,21 +227,32 @@ export default {
     container.querySelector("#btn-save").onclick = async () => {
       const payload = {
         email: $em.value.trim(),
-        password: $pw.value, // opcional; se vazio, cria temporária (e você pode enviar reset)
         perfil: $pf.value,
         posto_graduacao: $pg.value,
         nome_guerra: $ng.value,
         full_name: $fn.value
+        // password intencionalmente NÃO enviado (fluxo por e-mail)
       };
+
       try {
-        if (!payload.email || !payload.perfil) { $msg.textContent = "E-mail e Perfil são obrigatórios."; return; }
+        if (!payload.email || !payload.perfil) {
+          $msg.textContent = "E-mail e Perfil são obrigatórios.";
+          return;
+        }
+
         if (!editingId) {
+          // CRIAR: sem senha, e já dispara e-mail de "definir senha"
           $msg.textContent = "Criando usuário...";
           await callAPI("", "POST", payload);
+
+          $msg.textContent = "Enviando e-mail para definir senha...";
+          await callAPI("?action=reset", "POST", { email: payload.email });
+
           clearForm();
           await loadPage();
-          $msg.textContent = "Usuário criado. Ele deverá trocar a senha no primeiro login.";
+          $msg.textContent = "Usuário criado. Ele recebeu um e-mail para definir a senha.";
         } else {
+          // ATUALIZAR
           $msg.textContent = "Atualizando usuário...";
           await callAPI("", "PUT", { id: editingId, ...payload });
           clearForm();
