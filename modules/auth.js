@@ -1,23 +1,23 @@
 // modules/auth.js
-// Fluxos: login por e-mail/senha, "esqueci minha senha" (recovery)
-// e tratamento simples para "primeiro acesso".
-// Siglas:
-// - JWT: JSON Web Token (token do usuário logado)
-// - RLS: Row Level Security (segurança no banco)
+// Login por e-mail/senha + "Esqueci minha senha".
+// Se o perfil exigir primeira definição de senha, enviamos o e-mail automaticamente.
+// TOTALMENTE ISOLADO: classes prefixadas .auth-*
 
 import { supabase } from "../supabaseClient.js";
 
-function cssOnce() {
+function injectAuthCssOnce() {
   if (document.getElementById("auth-css")) return;
   const st = document.createElement("style");
   st.id = "auth-css";
   st.textContent = `
-    .auth-card { padding:12px; }
+    .auth-wrap { padding: 8px 0; }
+    .auth-title { margin: 0 0 8px 0; font-size: 18px; }
+    .auth-area { margin: 0; }
     .auth-row { display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; }
     .auth-row > div { display:flex; flex-direction:column; }
-    .auth-row label { margin-bottom:4px; }
+    .auth-row label { margin-bottom:4px; font-size: 14px; }
     .auth-row input, .auth-row button { height:34px; }
-    .msg { margin-top:8px; font-size:12px; }
+    .auth-msg { margin-top:8px; font-size:12px; }
   `;
   document.head.appendChild(st);
 }
@@ -44,22 +44,19 @@ export default {
   title: "Entrar",
   route: "#/entrar",
   async view(container) {
-    cssOnce();
+    injectAuthCssOnce();
 
     container.innerHTML = `
-      <div class="container">
-        <div class="card auth-card">
-          <h3>Entrar</h3>
-          <div id="auth-area"></div>
-          <div class="msg" id="auth-msg"></div>
-        </div>
+      <div class="auth-wrap">
+        <h3 class="auth-title">Entrar</h3>
+        <div id="auth-area" class="auth-area"></div>
+        <div id="auth-msg" class="auth-msg"></div>
       </div>
     `;
 
     const $area = container.querySelector("#auth-area");
-    const $msg = container.querySelector("#auth-msg");
+    const $msg  = container.querySelector("#auth-msg");
 
-    // Renderizações
     const renderLogin = () => {
       $area.innerHTML = `
         <div class="auth-row">
@@ -73,7 +70,7 @@ export default {
       bindLogin();
     };
 
-    // Envia um e-mail para definir/redefinir senha e orienta o usuário
+    // Envia um e-mail para definir/redefinir senha e apenas orienta o usuário
     const renderForceChangePassword = async () => {
       $area.innerHTML = `<p>Estamos enviando um e-mail para você definir sua senha...</p>`;
       try {
@@ -116,7 +113,6 @@ export default {
       };
     };
 
-    // Binds
     function bindLogin() {
       const $email = container.querySelector("#lg-email");
       const $pass  = container.querySelector("#lg-pass");
@@ -135,20 +131,16 @@ export default {
           const prof = await getMyProfile();
 
           if (prof?.must_change_password) {
-            // Tentativa simples: limpar a flag para não repetir no próximo login
+            // Opcionalmente tenta limpar a flag (não impacta layout)
             try {
               await supabase.from("profiles")
                 .update({ must_change_password: false })
                 .eq("id", user.id);
-              // Mesmo se falhar, seguimos para o fluxo do e-mail
             } catch (_) {}
-
-            // Envia e-mail de definição (caso ainda não tenha definido)
             await renderForceChangePassword();
             return;
           }
 
-          // Perfil OK → segue para a aplicação
           location.hash = "#/processos";
         } catch (e) {
           $msg.textContent = "Erro ao carregar perfil: " + e.message;
@@ -166,12 +158,10 @@ export default {
       };
     }
 
-    // Roteamento do módulo: decide qual tela mostrar
+    // Decide o que mostrar
     try {
       const sess = await getSession();
       if (!sess) { renderLogin(); return; }
-
-      // Se já está logado, mostra resumo e botão "Sair"
       await renderLogged();
     } catch (e) {
       $msg.textContent = "Erro: " + e.message;
