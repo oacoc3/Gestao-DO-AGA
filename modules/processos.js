@@ -134,7 +134,7 @@ function viewTabela(list) {
   `;
 }
 
-// ========= Formulário (com máscara de NUP) =========
+// ========= Formulário =========
 
 function viewFormulario() {
   return `
@@ -146,8 +146,9 @@ function viewFormulario() {
           <label>NUP</label>
           <input id="f-nup" inputmode="numeric" autocomplete="off" placeholder="00000.000000/0000-00" />
         </div>
-        <div style="flex:0 0 auto">
+        <div style="flex:0 0 auto; display:flex; gap:8px">
           <button id="btn-buscar">Buscar</button>
+          <button id="btn-limpar" type="button">Limpar</button>
         </div>
       </div>
 
@@ -230,6 +231,7 @@ export default {
     const $entrada = el("#f-entrada");
     const $status  = el("#f-status");
     const $buscar  = el("#btn-buscar");
+    const $limpar  = el("#btn-limpar");
     const $salvar  = el("#btn-salvar");
     const $msg     = el("#msg-novo");
     const grid     = el("#grid");
@@ -245,8 +247,10 @@ export default {
       $nup.value = maskNUP(digits);
     });
 
-    function resetForm() {
+    // resetForm: agora aceita 'clearNup' para limpar o campo quando solicitado
+    function resetForm(clearNup = false) {
       $msg.textContent = "";
+      if (clearNup) $nup.value = "";
       $tipo.value = "";
       $entrada.value = "";
       $status.value = "";
@@ -320,7 +324,7 @@ export default {
       }
       const nupMasked = maskNUP(digits);
 
-      resetForm(); // limpa e bloqueia campos antes de buscar
+      resetForm(false); // limpa demais campos, mantém o NUP visível durante a busca
       $msg.textContent = "Buscando...";
 
       try {
@@ -330,12 +334,19 @@ export default {
         } else {
           perguntaCriar((decisao) => {
             if (decisao) setCreateMode(nupMasked);
-            else resetForm();
+            else { resetForm(true); $nup.focus(); } // 'Não' limpa o NUP
           });
         }
       } catch (e) {
         $msg.textContent = "Erro ao buscar: " + e.message;
       }
+    });
+
+    // Botão Limpar (limpa apenas o NUP e reseta o formulário)
+    $limpar.addEventListener("click", () => {
+      resetForm(true);
+      $msg.textContent = "NUP limpo.";
+      $nup.focus();
     });
 
     // Clique em Salvar
