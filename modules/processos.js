@@ -31,14 +31,6 @@ function maskNUP(digits) {
   if (len <= 15) return d.slice(0, 5) + "." + d.slice(5, 11) + "/" + d.slice(11);
   return d.slice(0, 5) + "." + d.slice(5, 11) + "/" + d.slice(11, 15) + "-" + d.slice(15, 17);
 }
-
-/* Exibição: formata NUP completo (00000.000000/0000-00) sem alterar o valor bruto */
-function formatNUP(n) {
-  const d = (n || "").replace(/\D/g, "");
-  if (d.length !== 17) return maskNUP(d);
-  return d.replace(/^(\d{5})(\d{6})(\d{4})(\d{2})$/, '$1.$2/$3-$4');
-}
-
 const isFullNUP = (v) => onlyDigits17(v).length === 17;
 
 /* =========================
@@ -296,7 +288,7 @@ function viewTabela(listView, sort) {
   `;
   const body = listView.map(v => `
     <div class="proc-grid-row" data-id="${v.id}" data-nup="${v.nup}">
-      <div>${formatNUP(v.nup)}</div>
+      <div>${v.nup}</div>
       <div>${v.tipo}</div>
       <div>${v.status}</div>
       <div>${v.entrada || ""}</div>
@@ -386,14 +378,12 @@ function bindTabela(container, refresh, onPickRow) {
     const nup = row.getAttribute("data-nup");
     row.addEventListener("click", async () => {
       onPickRow(id);
-      const nupInput = document.getElementById("f-nup");
-      if (nupInput) nupInput.value = formatNUP(nup);
       try {
         container.querySelectorAll(".proc-grid-row").forEach(r => r.classList.remove("row-selected"));
         row.classList.add("row-selected");
         const hist = await getHistorico(id);
         const pane = document.getElementById("hist-pane");
-        pane.innerHTML = viewHistorico(`Histórico — ${formatNUP(nup)}`, hist);
+        pane.innerHTML = viewHistorico(`Histórico — ${nup}`, hist);
       } catch (e) {
         alert("Erro ao carregar histórico: " + e.message);
       }
@@ -550,34 +540,13 @@ export default {
       currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
       pinnedId = null; // remove o pino ao limpar
     }
-   function setCreateMode(nupMasked) {
-  // entra em modo criação e zera contextos de edição
-  currentAction = "create";
-  currentRowId = null;
-  originalStatus = null;
-
-  // mantém o NUP (mascarado) que o usuário buscou
-  pendingNup = nupMasked;
-  currentNupMasked = nupMasked;
-
-  // LIMPA os demais campos para o usuário informar os dados do novo processo
-  // (assumindo que existe a opção placeholder com value="" no select de Tipo e Status)
-  $tipo.value = "";
-  $entrada.value = "";
-  $status.value = "";
-
-  // habilita edição dos campos e o botão salvar
-  $msg.textContent = "Preencha os campos e clique em Salvar.";
-  $tipo.disabled = false;
-  $entrada.disabled = false;
-  $status.disabled = false;
-  $salvar.disabled = false;
-  $excluir.disabled = true;
-
-  // histórico vazio (é um novo processo)
-  histPane.innerHTML = viewHistorico("Histórico", []);
-}
-
+    function setCreateMode(nupMasked) {
+      pendingNup = nupMasked; currentNupMasked = nupMasked;
+      $msg.textContent = "Preencha os campos e clique em Salvar.";
+      $tipo.disabled = false; $entrada.disabled = false; $status.disabled = false;
+      $salvar.disabled = false; $excluir.disabled = true;
+      histPane.innerHTML = viewHistorico("Histórico", []);
+    }
     function setUpdateMode(row) {
       currentAction = "update"; currentRowId = row.id; originalStatus = row.status; currentNupMasked = row.nup;
       $tipo.value = row.tipo || ""; $entrada.value = row.entrada_regional || ""; $status.value = row.status || "";
