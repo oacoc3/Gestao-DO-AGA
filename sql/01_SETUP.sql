@@ -1,7 +1,44 @@
 -- ===========================================
--- 01_SETUP.sql  (estrutura usada pela SPA)
+-- 00_RESET_SETUP.sql  (reset + estrutura usada pela SPA)
 -- ===========================================
 begin;
+
+
+-- Remover TRIGGERS (se existirem)
+drop trigger if exists trg_processos_set_meta    on public.processos;
+drop trigger if exists trg_processos_log_history on public.processos;
+drop trigger if exists trg_profiles_set_timestamp on public.profiles;
+
+-- Remover FUNÇÕES (se existirem)
+drop function if exists public.fn_processos_set_meta();
+drop function if exists public.fn_processos_log_history();
+drop function if exists public.fn_profiles_set_timestamp();
+
+-- Remover POLÍTICAS (se existirem)
+drop policy if exists processos_select on public.processos;
+drop policy if exists processos_insert on public.processos;
+drop policy if exists processos_update on public.processos;
+drop policy if exists processos_delete on public.processos;
+
+drop policy if exists sh_select on public.status_history;
+drop policy if exists sh_insert on public.status_history;
+drop policy if exists sh_update on public.status_history;
+drop policy if exists sh_delete on public.status_history;
+
+drop policy if exists profiles_select on public.profiles;
+drop policy if exists profiles_insert on public.profiles;
+drop policy if exists profiles_update on public.profiles;
+drop policy if exists profiles_delete on public.profiles;
+
+-- Desativar RLS antes de dropar (não é obrigatório, mas deixa limpo)
+alter table if exists public.processos      disable row level security;
+alter table if exists public.status_history disable row level security;
+alter table if exists public.profiles       disable row level security;
+
+-- Apagar TABELAS (status_history depende de processos)
+drop table if exists public.status_history;
+drop table if exists public.processos;
+drop table if exists public.profiles;
 
 -- Extensão para gerar UUID (se já existir, não dá erro)
 create extension if not exists pgcrypto;
@@ -44,6 +81,23 @@ create table public.status_history (
 create index if not exists idx_sh_processo_changed_at
   on public.status_history (processo_id, changed_at desc);
 create index if not exists idx_sh_processo on public.status_history (processo_id);
+
+-- ============================
+-- PERFIS DE USUÁRIOS: profiles
+-- ============================
+create table public.profiles (
+  id                   uuid primary key references auth.users(id) on delete cascade,
+  email                text not null unique,
+  full_name            text,
+  nome_guerra          text,
+  posto_graduacao      text,
+  perfil               text not null check (perfil in ('Administrador','CH AGA','CH OACO','CH OAGA','Analista OACO','Analista OAGA','Visitante')),
+  must_change_password boolean not null default false,
+  updated_at           timestamptz not null default now()
+);
+
+create index if not exists idx_profiles_updated_id_desc
+  on public.profiles (updated_at desc, id desc);
 
 -- ============================
 -- FUNÇÕES DE TRIGGER (PL/pgSQL)
@@ -103,8 +157,21 @@ begin
 end;
 $$;
 
+-- BEFORE: atualiza updated_at em profiles
+create or replace function public.fn_profiles_set_timestamp()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
 -- ============================
--- TRIGGERS em processos
+-- TRIGGERS
 -- ============================
 -- BEFORE: metadados
 create trigger trg_processos_set_meta
@@ -118,13 +185,19 @@ after insert or update on public.processos
 for each row
 execute function public.fn_processos_log_history();
 
+-- BEFORE UPDATE: timestamp em profiles
+create trigger trg_profiles_set_timestamp
+before update on public.profiles
+for each row
+execute function public.fn_profiles_set_timestamp();
+
 -- ============================
 -- RLS (Row-Level Security)
 -- ============================
 alter table public.processos      enable row level security;
 alter table public.status_history enable row level security;
+alter table public.profiles       enable row level security;
 
--- Políticas mínimas, conforme a SPA:
 -- processos: todos os usuários AUTENTICADOS podem listar/criar/atualizar/excluir
 drop policy if exists processos_select on public.processos;
 create policy processos_select
@@ -155,12 +228,62 @@ for delete
 to authenticated
 using (true);
 
--- status_history: somente leitura para AUTENTICADOS (inserções vêm do TRIGGER, com SECURITY DEFINER)
+-- status_history: somente leitura para AUTENTICADOS
 drop policy if exists sh_select on public.status_history;
 create policy sh_select
 on public.status_history
 for select
 to authenticated
 using (true);
+
+-- profiles: cada usuário acessa apenas seu próprio registro
+drop policy if exists profiles_select on public.profiles;
+create policy profiles_select
+on public.profiles
+for select
+to authenticated
+using (auth.uid() = id);
+
+drop policy if exists profiles_insert on public.profiles;
+create policy profiles_insert
+on public.profiles
+for insert
+to authenticated
+with check (auth.uid() = id);
+
+drop policy if exists profiles_update on public.profiles;
+create policy profiles_update
+on public.profiles
+for update
+to authenticated
+using (auth.uid() = id)
+with check (auth.uid() = id);
+
+-- ============================
+-- Usuário Administrador padrão
+-- ============================
+do $$
+declare
+  v_uid uuid;
+begin
+  -- remove usuário existente (se houver)
+  delete from auth.users where email = 'macedocsm@fab.mil.br';
+
+  -- cria novo usuário no auth.users
+  v_uid := gen_random_uuid();
+  insert into auth.users (id, email, encrypted_password, email_confirmed_at, raw_app_meta_data)
+  values (
+    v_uid,
+    'macedocsm@fab.mil.br',
+    crypt('123456', gen_salt('bf')),
+    now(),
+    '{"perfil":"Administrador"}'
+  );
+
+  -- atribui perfil Administrador
+  insert into public.profiles (id, email, perfil, must_change_password)
+  values (v_uid, 'macedocsm@fab.mil.br', 'Administrador', true);
+end
+$$;
 
 commit;
