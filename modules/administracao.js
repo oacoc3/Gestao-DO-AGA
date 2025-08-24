@@ -24,6 +24,10 @@ async function authFetch(input, init = {}) {
 
   const headers = new Headers(init.headers || {});
   headers.set("Authorization", `Bearer ${session.access_token}`);
+    // Some proxies (like Netlify) forward the auth header under a different
+  // name. Send it as "Client-Authorization" as well to ensure the function
+  // receives the token.
+  headers.set("Client-Authorization", `Bearer ${session.access_token}`);
 
   // Se houver body e não definiram Content-Type, define JSON
   if (init.body && !headers.has("Content-Type")) {
