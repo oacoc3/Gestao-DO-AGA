@@ -15,6 +15,8 @@ const STATUS = [
   "Sobrestado Documental", "Sobrestado Técnico", "Análise ICA",
   "Publicação de Portaria", "Concluído", "Remoção/Rebaixamento", "Término de Obra"
 ];
+const SOBRESTADOS = new Set(["Sobrestado Documental", "Sobrestado Técnico"]);
+const DIA_MS = 24 * 60 * 60 * 1000;
 
 /* =========================
    Máscara / validação NUP
@@ -31,30 +33,90 @@ function maskNUP(digits) {
   if (len <= 15) return d.slice(0, 5) + "." + d.slice(5, 11) + "/" + d.slice(11);
   return d.slice(0, 5) + "." + d.slice(5, 11) + "/" + d.slice(11, 15) + "-" + d.slice(15, 17);
 }
-const isFullNUP = (v) => onlyDigits17(v).length === 17;
+
+/* Exibição: formata NUP completo (00000.000000/0000-00) sem alterar o valor bruto */
+function formatNUP(n) {
+  const d = (n || "").replace(/\D/g, "");
+  if (d.length !== 17) return maskNUP(d);
+  return d.replace(/^(\d{5})(\d{6})(\d{4})(\d{2})$/, '$1.$2/$3-$4');
+}
 
 /* =========================
-   Acesso Supabase (CRUD)
+   Data access (Supabase)
    ========================= */
-async function getProcessoByNup(nup) {
+async function fetchPageByCursor(cursor) {
+  // Consulta com paginação por cursor (keyset)
+  const pageSize = 50;
+
+  let query = supabase
+    .from("processos")
+    .select("*")
+    .order("updated_at", { ascending: false })
+    .limit(pageSize + 1);
+
+  if (cursor) {
+    query = query.lt("updated_at", cursor);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  let nextCursor = null;
+  let rows = data || [];
+  if (rows.length > pageSize) {
+    const last = rows.pop();
+    nextCursor = last.updated_at;
+  }
+  return { data: rows, nextCursor };
+}
+
+async function getHistorico(processo_id) {
+  const { data, error } = await supabase
+    .from("status_history")
+    .select("*")
+    .eq("processo_id", processo_id)
+    .order("changed_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+async function getHistoricoBatch(ids) {
+  if (!ids || !ids.length) return [];
+  const { data, error } = await supabase
+    .from("status_history")
+    .select("*")
+    .in("processo_id", ids);
+  if (error) throw error;
+  return data || [];
+}
+
+async function getProcessoPorNUP(nupDigits17) {
   const { data, error } = await supabase
     .from("processos")
     .select("*")
-    .eq("nup", nup)
+    .eq("nup", nupDigits17)
+    .limit(1)
     .maybeSingle();
   if (error) throw error;
-  return data;
+  return data || null;
 }
-async function createProcesso(payload) {
+
+async function insertProcesso({ nup, tipo, entrada, status }) {
   const { data, error } = await supabase
     .from("processos")
-    .insert(payload)
+    .insert({
+      nup,
+      tipo,
+      entrada_regional: entrada || null,
+      status
+    })
     .select()
     .single();
   if (error) throw error;
   return data;
 }
-async function updateStatus(id, newStatus) {
+
+async function updateProcessoStatus(id, newStatus) {
   const { data, error } = await supabase
     .from("processos")
     .update({ status: newStatus })
@@ -64,51 +126,45 @@ async function updateStatus(id, newStatus) {
   if (error) throw error;
   return data;
 }
+
 async function deleteProcesso(id) {
-  const { error } = await supabase.from("processos").delete().eq("id", id);
+  const { error } = await supabase
+    .from("processos")
+    .delete()
+    .eq("id", id);
   if (error) throw error;
-  return true;
-}
-async function getHistorico(processoId) {
-  const { data, error } = await supabase
-    .from("status_history")
-    .select("*")
-    .eq("processo_id", processoId)
-    .order("changed_at", { ascending: false });
-  if (error) throw error;
-  return data;
-}
-async function getHistoricoBatch(ids) {
-  if (!ids.length) return [];
-  const { data, error } = await supabase
-    .from("status_history")
-    .select("processo_id, old_status, new_status, changed_at, changed_by_email, changed_by")
-    .in("processo_id", ids);
-  if (error) throw error;
-  return data;
 }
 
 /* =========================
-   Cálculo Prazo Regional
+   Prazos (60 dias + sobrestado)
    ========================= */
-const SOBRESTADOS = new Set(["Sobrestado Técnico", "Sobrestado Documental"]);
-const DIA_MS = 24 * 60 * 60 * 1000;
-
-function calcularPrazosMapa(processos, historicos) {
-  // última saída de sobrestado por processo
-  const saidaSobMap = new Map();
-  for (const h of historicos) {
-    const saiuDeSob = SOBRESTADOS.has(h.old_status) && !SOBRESTADOS.has(h.new_status);
-    if (saiuDeSob) {
-      const t = new Date(h.changed_at).getTime();
-      const prev = saidaSobMap.get(h.processo_id);
-      if (!prev || t > prev) saidaSobMap.set(h.processo_id, t);
-    }
+function calcularPrazosMapa(rows, historicosBatch) {
+  const histByProc = new Map();
+  for (const h of (historicosBatch || [])) {
+    const arr = histByProc.get(h.processo_id) || [];
+    arr.push(h);
+    histByProc.set(h.processo_id, arr);
   }
+  for (const [k, arr] of histByProc) {
+    arr.sort((a,b) => new Date(a.changed_at) - new Date(b.changed_at));
+  }
+
   const prazos = new Map();
-  for (const p of processos) {
+  for (const p of rows || []) {
+    if (SOBRESTADOS.has(p.status)) {
+      prazos.set(p.id, "Sobrestado");
+      continue;
+    }
     let base = p.entrada_regional ? new Date(p.entrada_regional) : null;
-    const tSaida = saidaSobMap.get(p.id);
+    const hist = histByProc.get(p.id) || [];
+    let saiuST = null, saiuSD = null;
+    for (const h of hist) {
+      const de = h.old_status || "";
+      const para = h.new_status || "";
+      if (de === "Sobrestado Técnico" && para !== "Sobrestado Técnico") saiuST = h.changed_at;
+      if (de === "Sobrestado Documental" && para !== "Sobrestado Documental") saiuSD = h.changed_at;
+    }
+    const tSaida = saiuST || saiuSD;
     if (tSaida) {
       const dt = new Date(tSaida);
       if (!base || dt > base) base = dt;
@@ -124,32 +180,37 @@ function calcularPrazoUnit(p, hist = []) {
   if (SOBRESTADOS.has(p.status)) return "Sobrestado";
   let base = p.entrada_regional ? new Date(p.entrada_regional) : null;
   for (const h of hist) {
-    const saiuDeSob = SOBRESTADOS.has(h.old_status) && !SOBRESTADOS.has(h.new_status);
-    if (saiuDeSob) {
-      const t = new Date(h.changed_at);
-      if (!base || t > base) base = t;
+    const de = h.old_status || "";
+    const para = h.new_status || "";
+    if (de === "Sobrestado Técnico" && para !== "Sobrestado Técnico") {
+      const dt = new Date(h.changed_at);
+      if (!base || dt > base) base = dt;
+    }
+    if (de === "Sobrestado Documental" && para !== "Sobrestado Documental") {
+      const dt = new Date(h.changed_at);
+      if (!base || dt > base) base = dt;
     }
   }
-  return base ? new Date(base.getTime() + 60 * DIA_MS).toISOString().slice(0, 10) : "";
+  if (!base) return "";
+  return new Date(base.getTime() + 60 * DIA_MS).toISOString().slice(0,10);
 }
 
 /* =========================
-   CSS (grid, rolagens, etc.)
+   CSS injetado (layout atual)
    ========================= */
 function ensureLayoutCSS() {
-  if (document.getElementById("proc-grid-css")) return;
+  if (document.getElementById("proc-css")) return;
   const style = document.createElement("style");
-  style.id = "proc-grid-css";
+  style.id = "proc-css";
   style.textContent = `
-    /* Sem rolagem de página */
-    html, body { overflow: hidden; }
+    .container{ max-width: 1200px; margin: 0 auto; padding: 0 8px; }
 
-    .proc-mod { display:flex; flex-direction:column; overflow:hidden; }
+    .card { background:#fff; border:1px solid #e6e6e6; border-radius:6px; padding:14px; }
+    .pane-title { font-size:1.2rem; font-weight:600; margin:0 0 10px 0; }
+    .small{ font-size:0.9rem; color:#444; }
 
-    /* Formulário compacto */
-    .proc-form-card { flex:0 0 auto; padding-top:8px; padding-bottom:8px; }
-    .proc-form-row { display:flex; align-items:flex-end; gap:8px; flex-wrap:nowrap; overflow:auto; }
-    .proc-form-row > div { display:flex; flex-direction:column; }
+    .proc-form-card{ margin-bottom:10px; }
+    .proc-form-row{ display:flex; gap:8px; flex-wrap:wrap; align-items:end; }
     .proc-form-row label { font-size:0.95rem; margin-bottom:2px; }
     .proc-form-row input, .proc-form-row select, .proc-form-row button { height:34px; }
 
@@ -192,66 +253,33 @@ function ensureLayoutCSS() {
     }
     .proc-grid-header > div,
     .proc-grid-row > div{
+      padding: 10px 10px;
+      border-bottom:1px solid #eee;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      text-align: center;
-      padding: 4px 6px;
-      font-size: 12px;
     }
+    .proc-grid-row:hover{ background:#fafafa; }
+    .proc-grid-row.row-selected{ background:#f2f8ff; }
 
-    /* Título + botões (ordenadores) empilhados */
-    .hdc { display:flex; flex-direction:column; align-items:center; gap:2px; }
-    .hdc .title { line-height:1.05; }
-    .sort-wrap { display:inline-flex; gap:2px; }
-    .sort-btn { border:1px solid #ccc; background:#f7f7f7; padding:0 4px; line-height:16px; height:18px; cursor:pointer; }
-    .sort-btn.active { background:#e9e9e9; font-weight:bold; }
-
-    .proc-grid-row.row-selected { outline:2px solid #999; outline-offset:-1px; }
+    .hdc{ display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
+    .hdc .sort-wrap{ display:flex; gap:2px; }
+    .sort-btn{ font-size:12px; padding:0 4px; height:20px; line-height:20px; }
+    .sort-btn.active{ background:#333; color:#fff; }
 
     /* Histórico */
-    :root{
-      --w-hist-data: clamp(12ch, 16ch, 18ch);
-      --w-hist-autor: clamp(16ch, 20ch, 24ch);
-    }
-    .hist-scroll { height:100%; overflow-y:auto; overflow-x:hidden; }
-
-    .hist-header,
-    .hist-row{
-      display:grid;
-      grid-template-columns:
-        var(--w-hist-data)
-        minmax(0, 1fr)
-        minmax(0, 1fr)
-        var(--w-hist-autor);
-      gap:0;
-      align-items:center;
-    }
-    .hist-header{
-      position: sticky; top: 0; z-index:2;
-      background:#fff; border-bottom:1px solid #ddd;
-    }
-    .hist-header > div, .hist-row > div{
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      text-align: center;
-      padding: 4px 6px;
-      font-size: 12px;
-    }
+    .hist-scroll{ flex:1 1 auto; min-height:0; overflow:auto; }
+    .hist-header, .hist-row{ display:grid; grid-template-columns: 1.3fr 1fr 1fr 1fr; }
+    .hist-header{ position:sticky; top:0; background:#fff; z-index:2; border-bottom:1px solid #ddd; }
+    .hist-header > div, .hist-row > div{ padding:10px; border-bottom:1px solid #eee; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   `;
   document.head.appendChild(style);
-}
 
-function applyHeights(root) {
-  const mod = root.querySelector(".proc-mod");
-  const split = root.querySelector(".proc-split");
-  if (!mod || !split) return;
-
-  const top = mod.getBoundingClientRect().top;
-  const available = window.innerHeight - top - 12;
-  mod.style.height = available + "px";
-
+  // altura dos painéis = viewport - cabeçalho - formulário
+  const split = document.querySelector(".proc-split");
+  if (!split) return;
+  const root = document.querySelector(".proc-mod");
+  const available = window.innerHeight - root.getBoundingClientRect().top - 16;
   const formH = root.querySelector(".proc-form-card").getBoundingClientRect().height;
   split.style.height = (available - formH - 10) + "px";
 }
@@ -287,8 +315,8 @@ function viewTabela(listView, sort) {
     </div>
   `;
   const body = listView.map(v => `
-    <div class="proc-grid-row" data-id="${v.id}" data-nup="${v.nup}">
-      <div>${v.nup}</div>
+    <div class="proc-grid-row" data-id="${v.id}" data-nup="${formatNUP(v.nup)}">
+      <div>${formatNUP(v.nup)}</div>
       <div>${v.tipo}</div>
       <div>${v.status}</div>
       <div>${v.entrada || ""}</div>
@@ -302,7 +330,7 @@ function viewTabela(listView, sort) {
 }
 
 /* =========================
-   VIEW: histórico (grid)
+   VIEW: Histórico
    ========================= */
 function viewHistorico(title, hist) {
   const header = `
@@ -410,55 +438,21 @@ function bindTabela(container, refresh, onPickRow) {
 /* =========================
    Paginação (keyset) + scroll
    ========================= */
-const PAGE_SIZE = 200; // tamanho da página
-
-async function fetchPageByCursor(cursor) {
-  // Estratégia: duas consultas para emular keyset (evita OR complexo no PostgREST)
-  // 1) updated_at < cursor.updated_at
-  // 2) updated_at = cursor.updated_at AND id < cursor.id
-  if (!cursor) {
-    const { data, error } = await supabase
-      .from("processos")
-      .select("*")
-      .order("updated_at", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(PAGE_SIZE);
-    if (error) throw error;
-    return pack(data || []);
-  } else {
-    const { data: part1, error: e1 } = await supabase
-      .from("processos")
-      .select("*")
-      .lt("updated_at", cursor.updated_at)
-      .order("updated_at", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(PAGE_SIZE);
-    if (e1) throw e1;
-
-    const remain = Math.max(0, PAGE_SIZE - (part1?.length || 0));
-    let part2 = [];
-    if (remain > 0) {
-      const { data: eqdata, error: e2 } = await supabase
-        .from("processos")
-        .select("*")
-        .eq("updated_at", cursor.updated_at)
-        .lt("id", cursor.id)
-        .order("updated_at", { ascending: false })
-        .order("id", { ascending: false })
-        .limit(remain);
-      if (e2) throw e2;
-      part2 = eqdata || [];
-    }
-    const rows = [...(part1 || []), ...part2];
-    return pack(rows);
-  }
-
-  function pack(rows) {
-    const nextCursor = rows.length
-      ? { updated_at: rows[rows.length - 1].updated_at, id: rows[rows.length - 1].id }
-      : null;
-    return { data: rows, nextCursor };
-  }
+function viewGrid(listView, sort) {
+  const html = viewTabela(listView, sort);
+  const grid = document.getElementById("grid");
+  grid.innerHTML = html;
+}
+function attachTableHandlers(container, refresh, onPickRow) {
+  bindTabela(container, refresh, onPickRow);
+}
+function attachHeaderHandlers(container) {
+  container.querySelectorAll(".hdc .title").forEach(lbl => {
+    lbl.addEventListener("click", () => {
+      const k = lbl.getAttribute("data-k");
+      container.dispatchEvent(new CustomEvent("sorttoggle", { detail: { key:k } }));
+    });
+  });
 }
 
 /* =========================
@@ -507,60 +501,75 @@ export default {
     let currentAction = null;   // 'update' | 'create' | null
     let currentRowId = null;
     let originalStatus = null;
-    let pendingNup = "";
-    let currentNupMasked = "";
+    let pendingCreateNUP = null;
 
+    // sort
+    let sort = { key: "updated_at", dir: "desc" };
+
+    // dados em memória
     let allList = [];
-    let prazosMap = new Map();
     let viewData = [];
-    let pinnedId = null; // para fixar no topo após busca
+    let prazosMap = new Map();
 
-    // paginação (keyset)
-    let cursor = null;
+    // paginação
+    let cursor = null;        // guarda o updated_at da última página
     let hasNext = true;
     let loadingPage = false;
 
-    const sort = { key:"atualizado", dir:"desc" };
+    function mapLabel(key) {
+      switch (key) {
+        case "nup": return "NUP";
+        case "tipo": return "Tipo";
+        case "status": return "Status";
+        case "entrada": return "1ª Entrada Regional";
+        case "prazo": return "Prazo Regional";
+        case "atualizadoPor": return "Atualizado por";
+        case "atualizado": return "Atualizado em";
+        default: return key;
+      }
+    }
 
-    // Alturas/rolagem interna
-    const resizeAll = () => applyHeights(root);
-    window.addEventListener("resize", resizeAll);
-    setTimeout(resizeAll, 0);
+    function renderGridPreservandoScroll() {
+      const sc = gridWrap.querySelector(".grid-scroll");
+      const top = sc ? sc.scrollTop : 0;
+      viewGrid(viewData, { key: sort.key, dir: sort.dir });
+      attachTableHandlers(gridWrap, refreshFirstPage, onPickRow);
+      const newSc = gridWrap.querySelector(".grid-scroll");
+      if (newSc) newSc.scrollTop = top;
+    }
 
-    // Máscara NUP
-    $nup.addEventListener("input", () => { $nup.value = maskNUP(onlyDigits17($nup.value)); });
+    function onPickRow(id) {
+      currentRowId = id;
+      currentAction = "update";
+      $salvar.disabled = true;
+      $excluir.disabled = false;
+      $tipo.disabled = true;
+      $entrada.disabled = false;
+      $status.disabled = false;
+    }
 
-    // Helpers de formulário
-    function resetForm(clearNup=false) {
+    function resetForm(clearNUP = false) {
+      currentAction = null;
+      currentRowId = null;
+      originalStatus = null;
+      $salvar.disabled = true;
+      $excluir.disabled = true;
+      $tipo.value = "";
+      $entrada.value = "";
+      $status.value = "";
+      if (clearNUP) $nup.value = "";
+      $tipo.disabled = true;
+      $entrada.disabled = true;
+      $status.disabled = true;
       $msg.textContent = "";
-      if (clearNup) $nup.value = "";
-      $tipo.value = ""; $entrada.value = ""; $status.value = "";
-      $tipo.disabled = true; $entrada.disabled = true; $status.disabled = true;
-      $salvar.disabled = true; $excluir.disabled = true;
-      currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
-      pinnedId = null; // remove o pino ao limpar
     }
-    function setCreateMode(nupMasked) {
-      pendingNup = nupMasked; currentNupMasked = nupMasked;
-      $msg.textContent = "Preencha os campos e clique em Salvar.";
-      $tipo.disabled = false; $entrada.disabled = false; $status.disabled = false;
-      $salvar.disabled = false; $excluir.disabled = true;
-      histPane.innerHTML = viewHistorico("Histórico", []);
-    }
-    function setUpdateMode(row) {
-      currentAction = "update"; currentRowId = row.id; originalStatus = row.status; currentNupMasked = row.nup;
-      $tipo.value = row.tipo || ""; $entrada.value = row.entrada_regional || ""; $status.value = row.status || "";
-      $tipo.disabled = true; $entrada.disabled = true; $status.disabled = false;
-      $salvar.disabled = true; $excluir.disabled = false;
-      $msg.textContent = "Processo encontrado. Altere o Status se necessário ou veja o Histórico.";
-    }
-    function perguntaCriar(on) {
-      $msg.innerHTML = `Processo não encontrado, gostaria de criar?
-        <button id="btn-sim" style="margin-left:8px">Sim</button>
-        <button id="btn-nao" style="margin-left:4px">Não</button>`;
-      el("#btn-sim").onclick = () => on(true);
-      el("#btn-nao").onclick = () => on(false);
-    }
+
+    // máscara de input do NUP (já existente)
+    $nup.addEventListener("input", () => {
+      const raw = $nup.value;
+      $nup.value = maskNUP(raw);
+    });
+
     function validarObrigatoriosParaCriar() {
       if (!$tipo.value) { alert("Selecione o Tipo."); return false; }
       if (!$entrada.value) { alert("Informe a 1ª Entrada Regional."); return false; }
@@ -590,91 +599,21 @@ export default {
     }
     function applySort() {
       const key = sort.key, dir = sort.dir === "asc" ? 1 : -1;
-      const val = (v) => {
+      const comp = (a, b) => {
         switch (key) {
-          case "nup": return v.nup || "";
-          case "tipo": return v.tipo || "";
-          case "status": return v.status || "";
-          case "entrada": return v.entradaTS ?? -Infinity;
-          case "prazo": return (v.prazoDisplay === "Sobrestado") ? Number.POSITIVE_INFINITY : (v.prazoTS ?? Number.POSITIVE_INFINITY);
-          case "atualizadoPor": return v.atualizadoPor || "";
-          case "atualizado": return v.atualizado ?? 0;
-          default: return "";
+          case "nup": return (a.nup > b.nup ? 1 : a.nup < b.nup ? -1 : 0) * dir;
+          case "tipo": return (a.tipo > b.tipo ? 1 : a.tipo < b.tipo ? -1 : 0) * dir;
+          case "status": return (a.status > b.status ? 1 : a.status < b.status ? -1 : 0) * dir;
+          case "entrada": return ((a.entradaTS || 0) - (b.entradaTS || 0)) * dir;
+          case "prazo": return ((a.prazoTS || 0) - (b.prazoTS || 0)) * dir;
+          case "atualizadoPor": return (a.atualizadoPor > b.atualizadoPor ? 1 : a.atualizadoPor < b.atualizadoPor ? -1 : 0) * dir;
+          case "atualizado": return ((a.atualizado || 0) - (b.atualizado || 0)) * dir;
+          default: return 0;
         }
       };
-      const arr = viewData.slice();
-      arr.sort((a,b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * dir);
-
-      // pino vai para o topo
-      if (pinnedId != null) {
-        const idx = arr.findIndex(v => String(v.id) === String(pinnedId));
-        if (idx > 0) {
-          const [item] = arr.splice(idx, 1);
-          arr.unshift(item);
-        }
-      }
-      return arr;
+      viewData.sort(comp);
     }
 
-    function renderGrid() {
-      const view = applySort();
-      gridWrap.innerHTML = viewTabela(view, sort);
-      bindTabela(gridWrap, refreshFirstPage, onPickRowFromList);
-
-      // eventos de ordenação
-      gridWrap.addEventListener("sortchange", (ev) => {
-        sort.key = ev.detail.key;
-        sort.dir = ev.detail.dir;
-        renderGrid();
-      });
-      gridWrap.addEventListener("sorttoggle", (ev) => {
-        const k = ev.detail.key;
-        if (sort.key === k) sort.dir = sort.dir === "asc" ? "desc" : "asc";
-        else { sort.key = k; sort.dir = "asc"; }
-        renderGrid();
-      });
-
-      // liga o infinite scroll
-      attachInfiniteScroll();
-      // mantém linha selecionada (se houver)
-      if (currentRowId) {
-        gridWrap.querySelectorAll(".proc-grid-row").forEach(r => {
-          if (r.getAttribute("data-id") === String(currentRowId)) r.classList.add("row-selected");
-        });
-      }
-    }
-
-    function renderGridPreservandoScroll() {
-      const sc = gridWrap.querySelector(".grid-scroll");
-      const st = sc ? sc.scrollTop : 0;
-      renderGrid();
-      const sc2 = gridWrap.querySelector(".grid-scroll");
-      if (sc2) sc2.scrollTop = st;
-    }
-
-    function onPickRowFromList(id) {
-      const row = allList.find(r => String(r.id) === String(id));
-      if (!row) return;
-      setUpdateMode(row);
-      $nup.value = row.nup;
-      currentRowId = row.id;
-      // não fixa pino no clique (só na busca)
-    }
-
-    // garante que um processo buscado apareça no topo
-    async function upsertPinnedRow(row) {
-      if (!allList.some(r => String(r.id) === String(row.id))) {
-        allList.push(row);
-        const hist = await getHistorico(row.id);
-        const prazo = calcularPrazoUnit(row, hist);
-        prazosMap.set(row.id, prazo);
-        buildViewData();
-      }
-      pinnedId = row.id;
-      renderGridPreservandoScroll();
-    }
-
-    // Scroll infinito
     function attachInfiniteScroll() {
       const sc = gridWrap.querySelector(".grid-scroll");
       if (!sc || sc.__bound) return;
@@ -705,9 +644,18 @@ export default {
       try {
         const { data, nextCursor } = await fetchPageByCursor(null);
         cursor = nextCursor;
-        hasNext = !!nextCursor && (data?.length || 0) > 0;
-        allList = []; prazosMap = new Map(); viewData = [];
-        await assimilateRows(data || []);
+        hasNext = !!nextCursor;
+        allList = data || [];
+        const ids = allList.map(r => r.id);
+        const historicos = await getHistoricoBatch(ids);
+        prazosMap = calcularPrazosMapa(allList, historicos);
+        buildViewData();
+        applySort();
+        viewGrid(viewData, sort);
+        attachTableHandlers(gridWrap, refreshFirstPage, onPickRow);
+        attachInfiniteScroll();
+      } catch (e) {
+        alert("Erro ao carregar processos: " + e.message);
       } finally {
         loadingPage = false;
       }
@@ -719,82 +667,97 @@ export default {
       try {
         const { data, nextCursor } = await fetchPageByCursor(cursor);
         cursor = nextCursor;
-        hasNext = !!nextCursor && (data?.length || 0) > 0;
+        hasNext = !!nextCursor;
         await assimilateRows(data || []);
+      } catch (e) {
+        console.error(e);
       } finally {
         loadingPage = false;
       }
     }
 
     async function refreshFirstPage() {
-      // recarrega a primeira página (após salvar/excluir)
-      pinnedId = null;
+      cursor = null;
+      hasNext = true;
+      loadingPage = false;
+      gridWrap.innerHTML = "Atualizando...";
       await fetchFirstPage();
     }
 
     // Ações do formulário
-    const buscar = async () => {
-      if (!isFullNUP($nup.value)) {
-        $msg.textContent = "Informe um NUP completo (17 dígitos)."; $nup.focus(); return;
-      }
-      const nupMasked = maskNUP(onlyDigits17($nup.value));
-      $msg.textContent = "Buscando...";
-      try {
-        const row = await getProcessoByNup(nupMasked);
-        if (row) {
-          setUpdateMode(row);
-          currentRowId = row.id;
-          await upsertPinnedRow(row); // garante a 1ª linha
-          const hist = await getHistorico(row.id);
-          histPane.innerHTML = viewHistorico(`Histórico — ${row.nup}`, hist);
-        } else {
-          perguntaCriar((decisao) => {
-            if (decisao) setCreateMode(nupMasked);
-            else { resetForm(true); histPane.innerHTML = viewHistorico("Histórico", []); $nup.focus(); }
-          });
-        }
-      } catch (e) {
-        $msg.textContent = "Erro ao buscar: " + e.message;
-      }
-    };
-
-    $buscar.addEventListener("click", buscar);
     $limpar.addEventListener("click", () => {
       resetForm(true);
       histPane.innerHTML = viewHistorico("Histórico", []);
-      renderGridPreservandoScroll();
-      $msg.textContent = "NUP limpo.";
       $nup.focus();
+    });
+
+    $buscar.addEventListener("click", async () => {
+      const digits = onlyDigits17($nup.value);
+      if (digits.length !== 17) { alert("Informe um NUP válido (17 dígitos)."); return; }
+      try {
+        const found = await getProcessoPorNUP(digits);
+        if (found) {
+          // posiciona no topo será feito em outra rotina; aqui apenas seleciona
+          $tipo.value = found.tipo || "";
+          $entrada.value = found.entrada_regional || "";
+          $status.value = found.status || "";
+          currentRowId = found.id;
+          currentAction = "update";
+          originalStatus = found.status || "";
+          $salvar.disabled = true;
+          $excluir.disabled = false;
+          $tipo.disabled = true;
+          $entrada.disabled = false;
+          $status.disabled = false;
+
+          const hist = await getHistorico(found.id);
+          histPane.innerHTML = viewHistorico(`Histórico — ${formatNUP(found.nup)}`, hist);
+        } else {
+          if (!confirm("Processo não encontrado, gostaria de criar?")) {
+            resetForm(false);
+            return;
+          }
+          $tipo.disabled = false;
+          $entrada.disabled = false;
+          $status.disabled = false;
+          currentAction = "create";
+          pendingCreateNUP = digits;
+          $salvar.disabled = false;
+          $excluir.disabled = true;
+          $msg.textContent = "Preencha os campos e clique em Salvar.";
+        }
+      } catch (e) {
+        alert("Erro na busca: " + e.message);
+      }
     });
 
     $salvar.addEventListener("click", async () => {
       try {
-        if (currentAction === "update") {
-          if ($status.value === originalStatus || !$status.value) { alert("Altere o Status para salvar."); return; }
-          await updateStatus(currentRowId, $status.value);
-          $msg.textContent = "Status atualizado com sucesso.";
-          originalStatus = $status.value; $salvar.disabled = true;
-          await refreshFirstPage();
-          const hist = await getHistorico(currentRowId);
-          histPane.innerHTML = viewHistorico(`Histórico — ${currentNupMasked}`, hist);
-        } else if (currentAction === "create") {
+        if (currentAction === "create") {
           if (!validarObrigatoriosParaCriar()) return;
-          const payload = {
-            nup: pendingNup,
+          const novo = await insertProcesso({
+            nup: pendingCreateNUP,
             tipo: $tipo.value,
-            status: $status.value,
-            entrada_regional: $entrada.value
-          };
-          const novo = await createProcesso(payload);
+            entrada: $entrada.value || null,
+            status: $status.value
+          });
           $msg.textContent = "Processo criado com sucesso.";
-          setUpdateMode(novo); currentRowId = novo.id;
+          resetForm(false);
+          histPane.innerHTML = viewHistorico(`Histórico — ${formatNUP(novo.nup)}`, []);
           await refreshFirstPage();
-          const hist = await getHistorico(novo.id);
-          histPane.innerHTML = viewHistorico(`Histórico — ${novo.nup}`, hist);
+        } else if (currentAction === "update" && currentRowId) {
+          if (!$status.value) { alert("Selecione um Status para salvar."); return; }
+          const updated = await updateProcessoStatus(currentRowId, $status.value);
+          originalStatus = updated.status || "";
+          $salvar.disabled = true;
+          $msg.textContent = "Status atualizado.";
+          await refreshFirstPage();
         } else {
-          alert("Use o botão Buscar antes de salvar.");
+          alert("Busque ou crie um processo antes de salvar.");
         }
-      } catch (e) { alert("Erro ao salvar: " + e.message); }
+      } catch (e) {
+        alert("Erro ao salvar: " + e.message);
+      }
     });
 
     $excluir.addEventListener("click", async () => {
