@@ -1,14 +1,19 @@
 // app.js – Bootstrap do app: autenticação + rotas + menu
 import { supabase } from "./supabaseClient.js";
 import { startRouter, addRoute } from "./router.js";
-import { modules, buildNav } from "./modules/index.js";
+import { getModules, buildNav } from "./modules/index.js";
 
 const appContainer = document.getElementById("app");
 const navEl = document.getElementById("nav");
 const authArea = document.getElementById("auth-area");
 
-// Rotas dos módulos
-modules.forEach(m => addRoute(m.route, (c) => m.view(c)));
+let currentModules = [];
+
+function setupModules(session) {
+  const perfil = session?.user?.app_metadata?.perfil;
+  currentModules = getModules(perfil);
+  currentModules.forEach(m => addRoute(m.route, (c) => m.view(c)));
+}
 
 // Autenticação (e-mail/senha)
 function renderAuthArea(session) {
@@ -20,7 +25,7 @@ function renderAuthArea(session) {
     document.getElementById("btn-logout").onclick = async () => {
       await supabase.auth.signOut();
     };
-    buildNav(navEl);
+    buildNav(navEl, currentModules);
   } else {
     authArea.innerHTML = `
       <form id="login-form" style="display:flex; gap:8px; align-items:center">
@@ -62,11 +67,13 @@ function guardRoutes(session) {
 
 // Sessão inicial
 const { data: { session } } = await supabase.auth.getSession();
+setupModules(session);
 renderAuthArea(session);
 guardRoutes(session);
 
 // Reage a mudanças de sessão (login/logout)
 supabase.auth.onAuthStateChange((_event, sessionNow) => {
+  setupModules(sessionNow);
   renderAuthArea(sessionNow);
   guardRoutes(sessionNow);
 });
