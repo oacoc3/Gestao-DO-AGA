@@ -1,10 +1,7 @@
 // modules/administracao.js
-// Módulo Administração
-// Regras seguidas:
-// - Não altera layout geral da aplicação (usa .container/.card/.table já existentes)
-// - Conversa exclusivamente com a Netlify Function /adminUsers criada no projeto
-// - Campos: posto_graduacao, nome_guerra, full_name (nome completo), email, perfil
-// - Perfis válidos espelhados do backend (iguais aos usados no app):
+// Módulo Administração (front-end)
+// Usa os estilos existentes (.container, .card, .table) — sem mexer no layout geral
+// Fala com a Function /.netlify/functions/adminUsers (acima)
 
 const PERFIS = [
   "Administrador", "CH AGA", "CH OACO", "CH OAGA",
@@ -21,14 +18,10 @@ async function api(method, body = null, query = "") {
     credentials: "include"
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg = json?.error || `Erro ${res.status}`;
-    throw new Error(msg);
-  }
+  if (!res.ok) throw new Error(json?.error || `Erro ${res.status}`);
   return json;
 }
-
-function h(str){ return str == null ? "" : String(str); }
+function h(s){ return s == null ? "" : String(s); }
 
 export default {
   id: "admin",
@@ -136,7 +129,6 @@ export default {
         password: h($pass.value).trim() || undefined
       };
     }
-
     function clearForm(keepEmail = false) {
       editingId = null;
       if (!keepEmail) $email.value = "";
@@ -150,7 +142,6 @@ export default {
       $excluir.disabled = true;
       $msg.textContent = "";
     }
-
     function fillForm(row) {
       editingId = row.id;
       $email.value = row.email || "";
@@ -227,7 +218,7 @@ export default {
       if (!editingId) return;
       try {
         await api("POST", { email: $email.value }, "?action=reset");
-        alert("Se SMTP estiver configurado no Supabase, o e-mail de redefinição foi enviado.");
+        alert("Se SMTP estiver configurado no Supabase, a mensagem de redefinição foi enviada.");
       } catch (err) {
         alert("Erro: " + err.message);
       }
