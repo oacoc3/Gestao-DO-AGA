@@ -39,7 +39,10 @@ function getCookie(header, name) {
   return null;
 }
 
-async function getCurrentUser(event, supabaseAdmin) {
+// Obtém o usuário associado ao token JWT enviado na requisição.
+// Usa um cliente supabase (geralmente com a chave ANON) apenas para
+// validar o token e recuperar os dados do usuário.
+async function getCurrentUser(event, supabase) {
   const auth = event.headers.authorization || event.headers.Authorization;
   let token = null;
   if (auth && auth.toLowerCase().startsWith("bearer ")) {
@@ -49,7 +52,7 @@ async function getCurrentUser(event, supabaseAdmin) {
     token = getCookie(cookie, "sb-access-token") || getCookie(cookie, "sb:token");
   }
   if (!token) return null;
-  const { data, error } = await supabaseAdmin.auth.getUser(token);
+  const { data, error } = await supabase.auth.getUser(token);
   if (error) return null;
   return data?.user || null;
 }
@@ -178,7 +181,7 @@ exports.handler = async function (event, context) {
     const supabaseAnon = createClient(URL, ANON, { auth: { persistSession: false } });
 
     // autenticação e perfil
-    const user = await getCurrentUser(event, supabaseAdmin);
+      const user = await getCurrentUser(event, supabaseAnon);
     if (!user) return res(401, { error: "Não autenticado." });
     if (!ensureAdmin(user)) return res(403, { error: "Acesso negado. Requer Administrador." });
 
