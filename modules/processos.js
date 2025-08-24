@@ -551,7 +551,7 @@ export default {
       pinnedId = null; // remove o pino ao limpar
     }
     function setCreateMode(nupMasked) {
-      pendingNup = nupMasked; currentNupMasked = nupMasked;
+      currentAction = "create"; pendingNup = nupMasked; currentNupMasked = nupMasked;
       $msg.textContent = "Preencha os campos e clique em Salvar.";
       $tipo.disabled = false; $entrada.disabled = false; $status.disabled = false;
       $salvar.disabled = false; $excluir.disabled = true;
