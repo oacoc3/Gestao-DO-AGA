@@ -1,10 +1,12 @@
 // modules/index.js – registro de módulos
 import dashboard from "./dashboard.js";
 import processos from "./processos.js";
+import administracao from "./administracao.js";
 
 export const modules = [
   dashboard,
   processos,
+  administracao,
 ];
 
 // Utilitário para gerar o menu de navegação
