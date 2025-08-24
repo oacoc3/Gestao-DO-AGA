@@ -31,6 +31,14 @@ function maskNUP(digits) {
   if (len <= 15) return d.slice(0, 5) + "." + d.slice(5, 11) + "/" + d.slice(11);
   return d.slice(0, 5) + "." + d.slice(5, 11) + "/" + d.slice(11, 15) + "-" + d.slice(15, 17);
 }
+
+/* Exibição: formata NUP completo (00000.000000/0000-00) sem alterar o valor bruto */
+function formatNUP(n) {
+  const d = (n || "").replace(/\D/g, "");
+  if (d.length !== 17) return maskNUP(d);
+  return d.replace(/^(\d{5})(\d{6})(\d{4})(\d{2})$/, '$1.$2/$3-$4');
+}
+
 const isFullNUP = (v) => onlyDigits17(v).length === 17;
 
 /* =========================
@@ -288,7 +296,7 @@ function viewTabela(listView, sort) {
   `;
   const body = listView.map(v => `
     <div class="proc-grid-row" data-id="${v.id}" data-nup="${v.nup}">
-      <div>${v.nup}</div>
+      <div>${formatNUP(v.nup)}</div>
       <div>${v.tipo}</div>
       <div>${v.status}</div>
       <div>${v.entrada || ""}</div>
@@ -383,7 +391,7 @@ function bindTabela(container, refresh, onPickRow) {
         row.classList.add("row-selected");
         const hist = await getHistorico(id);
         const pane = document.getElementById("hist-pane");
-        pane.innerHTML = viewHistorico(`Histórico — ${nup}`, hist);
+        pane.innerHTML = viewHistorico(`Histórico — ${formatNUP(nup)}`, hist);
       } catch (e) {
         alert("Erro ao carregar histórico: " + e.message);
       }
