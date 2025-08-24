@@ -6,12 +6,10 @@ begin;
 -- Remover TRIGGERS (se existirem)
 drop trigger if exists trg_processos_set_meta     on public.processos;
 drop trigger if exists trg_processos_log_history  on public.processos;
-drop trigger if exists trg_processos_status_history on public.processos;
 
 -- Remover FUNÇÕES (se existirem)
 drop function if exists public.fn_processos_set_meta();
 drop function if exists public.fn_processos_log_history();
-drop function if exists public.fn_processos_status_history();
 
 -- Remover POLÍTICAS (se existirem)
 drop policy if exists processos_select on public.processos;
