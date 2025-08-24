@@ -43,15 +43,23 @@ function getCookie(header, name) {
 // Usa um cliente supabase (geralmente com a chave ANON) apenas para
 // validar o token e recuperar os dados do usuário.
 async function getCurrentUser(event, supabase) {
-  const auth = event.headers.authorization || event.headers.Authorization;
+  const headers = event.headers || {};
+  const auth =
+    headers.authorization ||
+    headers.Authorization ||
+    headers["client-authorization"] ||
+    headers["Client-Authorization"];
+
   let token = null;
   if (auth && auth.toLowerCase().startsWith("bearer ")) {
     token = auth.slice(7);
   } else {
-    const cookie = event.headers.cookie || event.headers.Cookie;
+    const cookie = headers.cookie || headers.Cookie;
     token = getCookie(cookie, "sb-access-token") || getCookie(cookie, "sb:token");
   }
+
   if (!token) return null;
+
   const { data, error } = await supabase.auth.getUser(token);
   if (error) return null;
   return data?.user || null;
