@@ -284,7 +284,7 @@ async function proximaPagina() {
 //  Inicialização do módulo
 // ===============================
 
-export default async function initAdministracao() {
+async function initAdministracao() {
   // Liga botões
   $btnNovo().addEventListener("click", () => novo());
   $btnCriar().addEventListener("click", async () => {
@@ -316,3 +316,53 @@ export default async function initAdministracao() {
     toast("Erro: " + (e.message || e));
   }
 }
+
+export default {
+  id: "administracao",
+  title: "Administração",
+  route: "#/administracao",
+  async view(container) {
+    container.innerHTML = `
+      <div class="container adm-mod">
+        <div class="card">
+          <h3>Administração de usuários</h3>
+          <div class="adm-form">
+            <input id="admPosto" placeholder="Posto/Graduação" />
+            <input id="admGuerra" placeholder="Nome de Guerra" />
+            <input id="admNome" placeholder="Nome completo" />
+            <input id="admEmail" placeholder="E-mail" />
+            <select id="admPerfil">
+              <option value="Visitante">Visitante</option>
+              <option value="Administrador">Administrador</option>
+            </select>
+            <input id="admSenha" type="password" placeholder="Senha inicial" />
+          </div>
+          <div class="adm-actions">
+            <button id="admBtnNovo">Novo</button>
+            <button id="admBtnCriar">Criar/Atualizar</button>
+            <button id="admBtnReset">Enviar link</button>
+            <button id="admBtnExcluir">Excluir</button>
+          </div>
+          <table class="adm-grid">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Perfil</th>
+                <th>Posto</th>
+                <th>Guerra</th>
+                <th>Nome</th>
+              </tr>
+            </thead>
+            <tbody id="admUsersBody"></tbody>
+          </table>
+          <div class="adm-pager">
+            <button id="admBtnPrev">&larr; Anterior</button>
+            <button id="admBtnNext">Próxima &rarr;</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    await initAdministracao();
+  },
+};
