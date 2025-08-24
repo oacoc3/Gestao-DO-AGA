@@ -1,7 +1,5 @@
-// netlify/functions/adminUsers.js
 // API do módulo Administração (CommonJS)
-// Usa tabela `profiles` (id = auth.users.id)
-// Requer no Netlify as variáveis: SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
+// Requer SUPABASE_URL, SUPABASE_ANON_KEY e SUPABASE_SERVICE_ROLE_KEY no Netlify
 
 const { createClient } = require("@supabase/supabase-js");
 
@@ -9,8 +7,8 @@ const URL = process.env.SUPABASE_URL;
 const ANON = process.env.SUPABASE_ANON_KEY;
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const TABLE = "profiles"; // sua tabela
-const KEY_ID = "id";      // PK = auth.users.id
+const TABLE = "profiles";   // sua tabela
+const KEY_ID = "id";        // PK = auth.users.id
 
 function res(statusCode, body) {
   return {
@@ -19,7 +17,7 @@ function res(statusCode, body) {
       "Content-Type": "application/json",
       "Cache-Control": "no-store",
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, Client-Authorization, X-Supabase-Auth",
       "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
     },
     body: JSON.stringify(body),
@@ -28,46 +26,65 @@ function res(statusCode, body) {
 
 function getCookie(header, name) {
   if (!header) return null;
-  const parts = header.split(";").map((s) => s.trim());
-  for (const p of parts) {
-    const idx = p.indexOf("=");
-    if (idx === -1) continue;
-    const k = p.slice(0, idx);
-    const v = decodeURIComponent(p.slice(idx + 1));
+  for (const part of header.split(";")) {
+    const s = part.trim();
+    const i = s.indexOf("=");
+    if (i === -1) continue;
+    const k = s.slice(0, i);
+    const v = decodeURIComponent(s.slice(i + 1));
     if (k === name) return v;
   }
   return null;
 }
 
-// Obtém o usuário associado ao token JWT enviado na requisição.
-// Usa um cliente supabase (geralmente com a chave ANON) apenas para
-// validar o token e recuperar os dados do usuário.
-async function getCurrentUser(event, supabase) {
-  const headers = event.headers || {};
-  const auth =
-    headers.authorization ||
-    headers.Authorization ||
-    headers["client-authorization"] ||
-    headers["Client-Authorization"];
+// pega o token de vários lugares (Authorization / Client-Authorization / X-Supabase-Auth / cookies)
+function extractToken(headers = {}) {
+  const h = {};
+  for (const [k, v] of Object.entries(headers)) h[k.toLowerCase()] = v;
 
-  let token = null;
-  if (auth && auth.toLowerCase().startsWith("bearer ")) {
-    token = auth.slice(7);
-  } else {
-    const cookie = headers.cookie || headers.Cookie;
-    token = getCookie(cookie, "sb-access-token") || getCookie(cookie, "sb:token");
+  let auth =
+    h["authorization"] ||
+    h["client-authorization"] ||
+    h["x-supabase-auth"];
+
+  if (auth && typeof auth === "string") {
+    const low = auth.toLowerCase();
+    if (low.startsWith("bearer ")) return auth.slice(7);
+    return auth; // caso venha só o JWT
   }
 
+  const cookie = h["cookie"];
+  return (
+    getCookie(cookie, "sb-access-token") ||
+    getCookie(cookie, "sb:token") ||
+    null
+  );
+}
+
+async function getCurrentUser(event, supabaseAdmin) {
+  const token = extractToken(event.headers);
   if (!token) return null;
 
-  const { data, error } = await supabase.auth.getUser(token);
+  // valida com service-role (mais robusto)
+  const { data, error } = await supabaseAdmin.auth.getUser(token);
   if (error) return null;
   return data?.user || null;
 }
 
-function ensureAdmin(user) {
-  const perfil = user?.app_metadata?.perfil || user?.user_metadata?.perfil;
-  return perfil === "Administrador";
+async function isAdmin(supabaseAdmin, user) {
+  const metaPerfil =
+    user?.app_metadata?.perfil || user?.user_metadata?.perfil;
+  if (metaPerfil === "Administrador") return true;
+
+  // confere também na tabela profiles
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .select("perfil")
+    .eq(KEY_ID, user.id)
+    .maybeSingle();
+
+  if (error) return false;
+  return data?.perfil === "Administrador";
 }
 
 async function listUsers(supabaseAdmin, page = 1, size = 50) {
@@ -82,7 +99,7 @@ async function listUsers(supabaseAdmin, page = 1, size = 50) {
   return data || [];
 }
 
-async function createUser(supabaseAdmin, supabaseAnon, payload) {
+async function createUser(supabaseAdmin, _supabaseAnon, payload) {
   const {
     email,
     perfil = "Visitante",
@@ -94,19 +111,18 @@ async function createUser(supabaseAdmin, supabaseAnon, payload) {
 
   if (!email) throw new Error("Informe o e-mail.");
 
-  // cria no auth
-  const { data: created, error: e1 } = await supabaseAdmin.auth.admin.createUser({
-    email,
-    password: password || undefined,
-    email_confirm: true,
-    app_metadata: { perfil },
-  });
+  const { data: created, error: e1 } =
+    await supabaseAdmin.auth.admin.createUser({
+      email,
+      password: password || undefined,
+      email_confirm: true,
+      app_metadata: { perfil },
+    });
   if (e1) throw e1;
 
   const userId = created?.user?.id;
   if (!userId) throw new Error("Falha ao criar usuário.");
 
-  // insere no profiles
   const { error: e2 } = await supabaseAdmin.from(TABLE).insert([
     {
       [KEY_ID]: userId,
@@ -124,28 +140,17 @@ async function createUser(supabaseAdmin, supabaseAnon, payload) {
 }
 
 async function updateUser(supabaseAdmin, payload) {
-  const {
-    id, // obrigatório
-    email,
-    perfil,
-    posto_graduacao,
-    nome_guerra,
-    full_name,
-  } = payload;
-
+  const { id, email, perfil, posto_graduacao, nome_guerra, full_name } = payload;
   if (!id) throw new Error("ID ausente.");
 
-  // atualiza auth (email e/ou app_metadata.perfil)
   const patch = {};
   if (email) patch.email = email;
   if (perfil) patch.app_metadata = { perfil };
-
-  if (Object.keys(patch).length > 0) {
+  if (Object.keys(patch).length) {
     const { error: e1 } = await supabaseAdmin.auth.admin.updateUserById(id, patch);
     if (e1) throw e1;
   }
 
-  // atualiza tabela profiles
   const { error: e2 } = await supabaseAdmin
     .from(TABLE)
     .update({
@@ -176,24 +181,25 @@ async function sendReset(supabaseAnon, email) {
   return { ok: true };
 }
 
-exports.handler = async function (event, context) {
+exports.handler = async function (event) {
   try {
     if (event.httpMethod === "OPTIONS") return res(200, { ok: true });
 
-    // valida variáveis
     if (!URL || !ANON || !SERVICE) {
       return res(500, { error: "Variáveis SUPABASE_URL/ANON/SERVICE ausentes no Netlify." });
     }
 
     const supabaseAdmin = createClient(URL, SERVICE, { auth: { persistSession: false } });
-    const supabaseAnon = createClient(URL, ANON, { auth: { persistSession: false } });
+    const supabaseAnon  = createClient(URL, ANON,    { auth: { persistSession: false } });
 
-    // autenticação e perfil
-      const user = await getCurrentUser(event, supabaseAnon);
+    // autenticação + autorização
+    const user = await getCurrentUser(event, supabaseAdmin);
     if (!user) return res(401, { error: "Não autenticado." });
-    if (!ensureAdmin(user)) return res(403, { error: "Acesso negado. Requer Administrador." });
 
-    const qs = event.queryStringParameters || {};
+    const allowed = await isAdmin(supabaseAdmin, user);
+    if (!allowed) return res(403, { error: "Acesso negado. Requer Administrador." });
+
+    const qs   = event.queryStringParameters || {};
     const body = event.body ? JSON.parse(event.body) : {};
 
     if (event.httpMethod === "GET") {
