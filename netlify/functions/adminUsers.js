@@ -1,263 +1,159 @@
-// API do módulo Administração (CommonJS)
-// Requer SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY no Netlify
+// netlify/functions/adminUsers.js
+// Esta Function roda no servidor (Netlify) e usa a Service Role Key do Supabase.
+// Siglas:
+// - JWT: JSON Web Token (token com “claims” do usuário, incluindo app_metadata.perfil)
+// - RLS: Row Level Security (segurança em nível de linha, aplicada no banco)
 
-const { createClient } = require("@supabase/supabase-js");
+import { createClient } from '@supabase/supabase-js';
 
-const URL     = process.env.SUPABASE_URL;
-const ANON    = process.env.SUPABASE_ANON_KEY;
-const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supaAdmin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY, // <- Service Role (NUNCA expor no cliente)
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
 
-const TABLE  = "profiles";
-const KEY_ID = "id";
-
-function res(statusCode, body) {
+function json(status, body) {
   return {
-    statusCode,
-    headers: {
-      "Content-Type": "application/json",
-      "Cache-Control": "no-store",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers":
-        "Content-Type, Authorization, Client-Authorization, X-Supabase-Auth",
-      "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
-    },
-    body: JSON.stringify(body),
+    statusCode: status,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
   };
 }
 
-function getCookie(header, name) {
-  if (!header) return null;
-  for (const part of header.split(";")) {
-    const s = part.trim();
-    const i = s.indexOf("=");
-    if (i === -1) continue;
-    const k = s.slice(0, i);
-    const v = decodeURIComponent(s.slice(i + 1));
-    if (k === name) return v;
-  }
-  return null;
+// Valida token do chamador e exige perfil Administrador
+async function requireAdmin(event) {
+  const auth = event.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (!token) throw { status: 401, message: 'Sem token' };
+
+  const { data, error } = await supaAdmin.auth.getUser(token);
+  if (error || !data?.user) throw { status: 401, message: 'Token inválido' };
+
+  const perfil = data.user.app_metadata?.perfil || 'Visitante';
+  if (perfil !== 'Administrador') throw { status: 403, message: 'Acesso negado' };
+
+  return { user: data.user };
 }
 
-function extractToken(event) {
-  const headers = event.headers || {};
-  const qs      = event.queryStringParameters || {};
-  let token = null;
-
-  const h = {};
-  for (const [k, v] of Object.entries(headers)) h[k.toLowerCase()] = v;
-
-  let auth =
-    h["authorization"] ||
-    h["client-authorization"] ||
-    h["x-supabase-auth"];
-
-  if (auth && typeof auth === "string") {
-    const low = auth.toLowerCase();
-    token = low.startsWith("bearer ") ? auth.slice(7) : auth;
-  }
-
-  if (!token) {
-    const cookie = h["cookie"];
-    token =
-      getCookie(cookie, "sb-access-token") ||
-      getCookie(cookie, "sb:token") ||
-      null;
-  }
-
-  if (!token && qs.auth) token = qs.auth;
-
-  if (!token && event.body) {
-    try {
-      const body = JSON.parse(event.body);
-      if (body && body.token) token = body.token;
-    } catch {}
-  }
-
-  return token || null;
-}
-
-async function getCurrentUserWith(token, client) {
-  if (!token) return { user: null, err: "no-token" };
-  const { data, error } = await client.auth.getUser(token);
-  if (error) return { user: null, err: error.message || "getUser-error" };
-  return { user: data?.user || null, err: null };
-}
-
-async function isAdmin(client, user) {
-  const perfilMeta =
-    user?.app_metadata?.perfil || user?.user_metadata?.perfil;
-  if (perfilMeta === "Administrador") return true;
-
-  const { data, error } = await client
-    .from(TABLE)
-    .select("perfil")
-    .eq(KEY_ID, user.id)
-    .maybeSingle();
-
-  if (error) return false;
-  return data?.perfil === "Administrador";
-}
-
-async function listUsers(client, page = 1, size = 50) {
-  const from = (page - 1) * size;
-  const to   = from + size - 1;
-  const { data, error } = await client
-    .from(TABLE)
-    .select("*")
-    .order("updated_at", { ascending: false })
-    .range(from, to);
-  if (error) throw error;
-  return data || [];
-}
-
-async function createUser(admin, _anon, payload) {
-  const {
-    email,
-    perfil = "Visitante",
-    posto_graduacao,
-    nome_guerra,
-    full_name,
-    password,
-  } = payload;
-
-  if (!email) throw new Error("Informe o e-mail.");
-
-  const { data: created, error: e1 } =
-    await admin.auth.admin.createUser({
-      email,
-      password: password || undefined,
-      email_confirm: true,
-      app_metadata: { perfil },
-    });
-  if (e1) throw e1;
-
-  const userId = created?.user?.id;
-  if (!userId) throw new Error("Falha ao criar usuário.");
-
-  const { error: e2 } = await admin.from(TABLE).insert([{
-    [KEY_ID]: userId,
-    email,
-    perfil,
-    posto_graduacao: posto_graduacao || null,
-    nome_guerra:     nome_guerra     || null,
-    full_name:       full_name       || null,
-    must_change_password: true,
-  }]);
-  if (e2) throw e2;
-
-  return { id: userId, email };
-}
-
-async function updateUser(admin, payload) {
-  const { id, email, perfil, posto_graduacao, nome_guerra, full_name } = payload;
-  if (!id) throw new Error("ID ausente.");
-
-  const patch = {};
-  if (email) patch.email = email;
-  if (perfil) patch.app_metadata = { perfil };
-  if (Object.keys(patch).length) {
-    const { error: e1 } = await admin.auth.admin.updateUserById(id, patch);
-    if (e1) throw e1;
-  }
-
-  const { error: e2 } = await admin
-    .from(TABLE)
-    .update({
-      email: email ?? undefined,
-      perfil: perfil ?? undefined,
-      posto_graduacao: posto_graduacao ?? undefined,
-      nome_guerra:     nome_guerra     ?? undefined,
-      full_name:       full_name       ?? undefined,
-    })
-    .eq(KEY_ID, id);
-  if (e2) throw e2;
-
-  return { id };
-}
-
-async function deleteUser(admin, id) {
-  if (!id) throw new Error("ID ausente.");
-  await admin.from(TABLE).delete().eq(KEY_ID, id);
-  const { error } = await admin.auth.admin.deleteUser(id);
-  if (error) throw error;
-  return { id };
-}
-
-async function sendReset(anon, email) {
-  if (!email) throw new Error("Informe o e-mail.");
-  const { error } = await anon.auth.resetPasswordForEmail(email);
-  if (error) throw error;
-  return { ok: true };
-}
-
-exports.handler = async function (event) {
+export async function handler(event) {
   try {
-    if (event.httpMethod === "OPTIONS") return res(200, { ok: true });
+    await requireAdmin(event);
 
-    if (!URL || !ANON || !SERVICE) {
-      return res(500, { error: "Variáveis SUPABASE_URL/ANON/SERVICE ausentes no Netlify." });
+    const url = new URL(event.rawUrl);
+    const method = event.httpMethod;
+
+    // LISTAR perfis (paginado simples)
+    if (method === 'GET') {
+      const page = Number(url.searchParams.get('page') || '1');
+      const size = Number(url.searchParams.get('size') || '50');
+      const from = (page - 1) * size;
+      const to = from + size - 1;
+
+      const { data, error } = await supaAdmin
+        .from('profiles')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .range(from, to);
+      if (error) throw error;
+      return json(200, { data });
     }
 
-    const supabaseAdmin = createClient(URL, SERVICE, { auth: { persistSession: false } });
-    const supabaseAnon  = createClient(URL, ANON,    { auth: { persistSession: false } });
+    // CRIAR usuário
+    if (method === 'POST') {
+      const body = JSON.parse(event.body || '{}');
+      const {
+        email,
+        password,                 // opcional: se não vier, geramos ou enviaremos reset
+        perfil,                   // 'Administrador', 'CH AGA', ...
+        posto_graduacao,
+        nome_guerra,
+        full_name
+      } = body;
 
-    // Autenticação (token pode vir no header, query, cookie OU body.token)
-    const token = extractToken(event);
-    if (!token) return res(401, { error: "Não autenticado." });
+      if (!email || !perfil) return json(400, { error: 'email e perfil são obrigatórios' });
 
-    // Tenta validar com service; se falhar, tenta com anon
-    let { user } = await getCurrentUserWith(token, supabaseAdmin);
-    if (!user) {
-      const retry = await getCurrentUserWith(token, supabaseAnon);
-      user = retry.user;
-    }
-    if (!user) return res(401, { error: "Não autenticado." });
+      // Cria no Auth com perfil no app_metadata
+      const { data: created, error: e1 } = await supaAdmin.auth.admin.createUser({
+        email,
+        password: password || crypto.randomUUID(), // senha temporária se não informada
+        email_confirm: true,
+        user_metadata: { full_name, nome_guerra, posto_graduacao },
+        app_metadata: { perfil }
+      });
+      if (e1) throw e1;
 
-    // Autorização
-    const allowed = await isAdmin(supabaseAdmin, user);
-    if (!allowed) return res(403, { error: "Acesso negado. Requer Administrador." });
+      // Registra/atualiza em public.profiles
+      const { error: e2 } = await supaAdmin
+        .from('profiles')
+        .upsert({
+          id: created.user.id,
+          email,
+          full_name,
+          nome_guerra,
+          posto_graduacao,
+          perfil,
+          must_change_password: true
+        });
+      if (e2) throw e2;
 
-    const qs   = event.queryStringParameters || {};
-    const body = event.body ? JSON.parse(event.body) : {};
-
-    // ---- LISTAGEM: aceitar POST action=list (token no body)
-    if (event.httpMethod === "POST" && qs.action === "list") {
-      const page = parseInt(body.page || "1", 10);
-      const size = parseInt(body.size || "50", 10);
-      const data = await listUsers(supabaseAdmin, page, size);
-      return res(200, { data });
-    }
-
-    // GET (mantido para compatibilidade, mas sem token por cookie pode falhar)
-    if (event.httpMethod === "GET") {
-      const page = parseInt(qs.page || "1", 10);
-      const size = parseInt(qs.size || "50", 10);
-      const data = await listUsers(supabaseAdmin, page, size);
-      return res(200, { data });
-    }
-
-    if (event.httpMethod === "POST" && qs.action === "reset") {
-      const out = await sendReset(supabaseAnon, body.email);
-      return res(200, { message: "Solicitação de redefinição enviada (se SMTP configurado).", ...out });
+      return json(201, { ok: true, id: created.user.id });
     }
 
-    if (event.httpMethod === "POST") {
-      const out = await createUser(supabaseAdmin, supabaseAnon, body);
-      return res(200, { message: "Usuário criado.", ...out });
+    // ATUALIZAR usuário
+    if (method === 'PUT' || method === 'PATCH') {
+      const body = JSON.parse(event.body || '{}');
+      const { id, email, perfil, posto_graduacao, nome_guerra, full_name } = body;
+      if (!id) return json(400, { error: 'id é obrigatório' });
+
+      const updates = {};
+      if (email) updates.email = email;
+      updates.user_metadata = { full_name, nome_guerra, posto_graduacao };
+      if (perfil) updates.app_metadata = { perfil };
+
+      const { error: e1 } = await supaAdmin.auth.admin.updateUserById(id, updates);
+      if (e1) throw e1;
+
+      const { error: e2 } = await supaAdmin
+        .from('profiles')
+        .update({ email, full_name, nome_guerra, posto_graduacao, perfil })
+        .eq('id', id);
+      if (e2) throw e2;
+
+      return json(200, { ok: true });
     }
 
-    if (event.httpMethod === "PUT") {
-      const out = await updateUser(supabaseAdmin, body);
-      return res(200, { message: "Usuário atualizado.", ...out });
+    // RESETAR senha (envia link de recuperação por e-mail)
+    if (method === 'POST' && (new URL(event.rawUrl)).searchParams.get('action') === 'reset') {
+      const body = JSON.parse(event.body || '{}');
+      const { email } = body;
+      if (!email) return json(400, { error: 'email é obrigatório' });
+
+      const { data: link, error: e1 } = await supaAdmin.auth.admin.generateLink({
+        type: 'recovery',
+        email
+      });
+      if (e1) throw e1;
+
+      // O Supabase envia e-mail automaticamente (se SMTP configurado).
+      return json(200, { ok: true, sent: true });
     }
 
-    if (event.httpMethod === "DELETE") {
-      const out = await deleteUser(supabaseAdmin, body.id);
-      return res(200, { message: "Usuário excluído.", ...out });
+    // EXCLUIR usuário
+    if (method === 'DELETE') {
+      const body = JSON.parse(event.body || '{}');
+      const { id } = body;
+      if (!id) return json(400, { error: 'id é obrigatório' });
+
+      const { error: e1 } = await supaAdmin.auth.admin.deleteUser(id);
+      if (e1) throw e1;
+
+      // O profile é removido automaticamente por ON DELETE CASCADE
+      return json(200, { ok: true });
     }
 
-    return res(405, { error: "Método não suportado." });
+    return json(404, { error: 'Rota não encontrada' });
   } catch (err) {
-    return res(500, { error: err?.message || "Erro interno" });
+    const status = err?.status || 500;
+    return json(status, { error: err?.message || String(err) });
   }
-};
+}
