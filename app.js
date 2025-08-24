@@ -27,7 +27,6 @@ function renderAuthArea(session) {
         <input id="email" type="email" placeholder="email" />
         <input id="password" type="password" placeholder="senha" />
         <button type="submit">Entrar</button>
-        <button type="button" id="btn-signup">Cadastrar</button>
       </form>
       <div id="auth-msg" class="small"></div>
     `;
@@ -41,16 +40,6 @@ function renderAuthArea(session) {
       const password = form.password.value;
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       msg.textContent = error ? ("Erro: " + error.message) : "";
-    };
-    document.getElementById("btn-signup").onclick = async () => {
-      const email = document.getElementById("email").value.trim();
-      const password = document.getElementById("password").value;
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) {
-        alert("Erro: " + error.message);
-      } else {
-        alert("Cadastro realizado. Verifique seu e-mail, se o projeto exigir confirmação.");
-      }
     };
   }
 }
