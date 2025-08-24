@@ -550,13 +550,34 @@ export default {
       currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
       pinnedId = null; // remove o pino ao limpar
     }
-    function setCreateMode(nupMasked) {
-      currentAction = "create"; pendingNup = nupMasked; currentNupMasked = nupMasked;
-      $msg.textContent = "Preencha os campos e clique em Salvar.";
-      $tipo.disabled = false; $entrada.disabled = false; $status.disabled = false;
-      $salvar.disabled = false; $excluir.disabled = true;
-      histPane.innerHTML = viewHistorico("Histórico", []);
-    }
+   function setCreateMode(nupMasked) {
+  // entra em modo criação e zera contextos de edição
+  currentAction = "create";
+  currentRowId = null;
+  originalStatus = null;
+
+  // mantém o NUP (mascarado) que o usuário buscou
+  pendingNup = nupMasked;
+  currentNupMasked = nupMasked;
+
+  // LIMPA os demais campos para o usuário informar os dados do novo processo
+  // (assumindo que existe a opção placeholder com value="" no select de Tipo e Status)
+  $tipo.value = "";
+  $entrada.value = "";
+  $status.value = "";
+
+  // habilita edição dos campos e o botão salvar
+  $msg.textContent = "Preencha os campos e clique em Salvar.";
+  $tipo.disabled = false;
+  $entrada.disabled = false;
+  $status.disabled = false;
+  $salvar.disabled = false;
+  $excluir.disabled = true;
+
+  // histórico vazio (é um novo processo)
+  histPane.innerHTML = viewHistorico("Histórico", []);
+}
+
     function setUpdateMode(row) {
       currentAction = "update"; currentRowId = row.id; originalStatus = row.status; currentNupMasked = row.nup;
       $tipo.value = row.tipo || ""; $entrada.value = row.entrada_regional || ""; $status.value = row.status || "";
