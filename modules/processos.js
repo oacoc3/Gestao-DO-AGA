@@ -32,6 +32,8 @@ function maskNUP(digits) {
   return d.slice(0, 5) + "." + d.slice(5, 11) + "/" + d.slice(11, 15) + "-" + d.slice(15, 17);
 }
 const isFullNUP = (v) => onlyDigits17(v).length === 17;
+// Sempre exibir com máscara
+const displayNUP = (v) => maskNUP(onlyDigits17(v));
 
 /* =========================
    Acesso Supabase (CRUD)
@@ -375,7 +377,7 @@ function bindTabela(container, refresh, onPickRow) {
   // clique nas linhas
   container.querySelectorAll(".proc-grid-row").forEach(row => {
     const id = row.getAttribute("data-id");
-    const nup = row.getAttribute("data-nup");
+    const nupMasked = row.getAttribute("data-nup"); // já vem mascarado
     row.addEventListener("click", async () => {
       onPickRow(id);
       try {
@@ -383,7 +385,7 @@ function bindTabela(container, refresh, onPickRow) {
         row.classList.add("row-selected");
         const hist = await getHistorico(id);
         const pane = document.getElementById("hist-pane");
-        pane.innerHTML = viewHistorico(`Histórico — ${nup}`, hist);
+        pane.innerHTML = viewHistorico(`Histórico — ${nupMasked}`, hist);
       } catch (e) {
         alert("Erro ao carregar histórico: " + e.message);
       }
@@ -527,7 +529,7 @@ export default {
     window.addEventListener("resize", resizeAll);
     setTimeout(resizeAll, 0);
 
-    // Máscara NUP
+    // Máscara NUP no input
     $nup.addEventListener("input", () => { $nup.value = maskNUP(onlyDigits17($nup.value)); });
 
     // Helpers de formulário
@@ -541,17 +543,45 @@ export default {
       pinnedId = null; // remove o pino ao limpar
     }
     function setCreateMode(nupMasked) {
-      pendingNup = nupMasked; currentNupMasked = nupMasked;
+      // >>> Correção principal: limpar campos e entrar em modo "create"
+      currentAction = "create";
+      pendingNup = nupMasked;
+      currentNupMasked = nupMasked;
+
+      $nup.value = nupMasked; // garante máscara no campo
+      $tipo.value = "";
+      $entrada.value = "";
+      $status.value = "";
+
+      $tipo.disabled = false;
+      $entrada.disabled = false;
+      $status.disabled = false;
+
+      $salvar.disabled = false;
+      $excluir.disabled = true;
+
       $msg.textContent = "Preencha os campos e clique em Salvar.";
-      $tipo.disabled = false; $entrada.disabled = false; $status.disabled = false;
-      $salvar.disabled = false; $excluir.disabled = true;
-      histPane.innerHTML = viewHistorico("Histórico", []);
+      histPane.innerHTML = viewHistorico(`Histórico — ${nupMasked}`, []);
     }
     function setUpdateMode(row) {
-      currentAction = "update"; currentRowId = row.id; originalStatus = row.status; currentNupMasked = row.nup;
-      $tipo.value = row.tipo || ""; $entrada.value = row.entrada_regional || ""; $status.value = row.status || "";
-      $tipo.disabled = true; $entrada.disabled = true; $status.disabled = false;
-      $salvar.disabled = true; $excluir.disabled = false;
+      currentAction = "update";
+      currentRowId = row.id;
+      originalStatus = row.status;
+      currentNupMasked = displayNUP(row.nup);
+
+      // preenche e bloqueia tipo/entrada; status editável
+      $nup.value = currentNupMasked;
+      $tipo.value = row.tipo || "";
+      $entrada.value = row.entrada_regional || "";
+      $status.value = row.status || "";
+
+      $tipo.disabled = true;
+      $entrada.disabled = true;
+      $status.disabled = false;
+
+      $salvar.disabled = true;
+      $excluir.disabled = false;
+
       $msg.textContent = "Processo encontrado. Altere o Status se necessário ou veja o Histórico.";
     }
     function perguntaCriar(on) {
@@ -571,13 +601,15 @@ export default {
       if (currentAction === "update") $salvar.disabled = ($status.value === originalStatus || !$status.value);
     });
 
-    // viewData (mapeia allList -> grid)
+    // viewData (mapeia allList -> grid) — NUP sempre mascarado
     function buildViewData() {
       viewData = allList.map(r => {
         const prazoStr = SOBRESTADOS.has(r.status) ? "Sobrestado" : (prazosMap.get(r.id) || "");
         return {
           id: r.id,
-          nup: r.nup, tipo: r.tipo, status: r.status,
+          nup: displayNUP(r.nup),   // <<< garante máscara na lista
+          tipo: r.tipo,
+          status: r.status,
           entrada: r.entrada_regional || "",
           atualizadoPor: r.modificado_por || "",
           atualizado: r.updated_at ? new Date(r.updated_at).getTime() : 0,
@@ -656,7 +688,7 @@ export default {
       const row = allList.find(r => String(r.id) === String(id));
       if (!row) return;
       setUpdateMode(row);
-      $nup.value = row.nup;
+      $nup.value = displayNUP(row.nup); // <<< máscara no formulário
       currentRowId = row.id;
       // não fixa pino no clique (só na busca)
     }
@@ -746,11 +778,16 @@ export default {
           currentRowId = row.id;
           await upsertPinnedRow(row); // garante a 1ª linha
           const hist = await getHistorico(row.id);
-          histPane.innerHTML = viewHistorico(`Histórico — ${row.nup}`, hist);
+          histPane.innerHTML = viewHistorico(`Histórico — ${displayNUP(row.nup)}`, hist);
         } else {
           perguntaCriar((decisao) => {
-            if (decisao) setCreateMode(nupMasked);
-            else { resetForm(true); histPane.innerHTML = viewHistorico("Histórico", []); $nup.focus(); }
+            if (decisao) {
+              setCreateMode(nupMasked);    // <<< limpa campos e habilita criação
+            } else {
+              resetForm(true);
+              histPane.innerHTML = viewHistorico("Histórico", []);
+              $nup.focus();
+            }
           });
         }
       } catch (e) {
@@ -780,7 +817,7 @@ export default {
         } else if (currentAction === "create") {
           if (!validarObrigatoriosParaCriar()) return;
           const payload = {
-            nup: pendingNup,
+            nup: pendingNup, // já mascarado
             tipo: $tipo.value,
             status: $status.value,
             entrada_regional: $entrada.value
@@ -790,7 +827,7 @@ export default {
           setUpdateMode(novo); currentRowId = novo.id;
           await refreshFirstPage();
           const hist = await getHistorico(novo.id);
-          histPane.innerHTML = viewHistorico(`Histórico — ${novo.nup}`, hist);
+          histPane.innerHTML = viewHistorico(`Histórico — ${displayNUP(novo.nup)}`, hist);
         } else {
           alert("Use o botão Buscar antes de salvar.");
         }
