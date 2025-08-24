@@ -160,9 +160,26 @@ begin
 end;
 $$ language plpgsql security definer set search_path = public;
 
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute function public.handle_new_user();
+-- Em vez de "create trigger" direto, faça assim:
+do $$
+begin
+  if exists (
+    select 1
+    from pg_trigger t
+    join pg_class c on c.oid = t.tgrelid
+    join pg_namespace n on n.oid = c.relnamespace
+    where t.tgname = 'on_auth_user_created'
+      and n.nspname = 'auth'
+      and c.relname = 'users'
+  ) then
+    drop trigger on_auth_user_created on auth.users;
+  end if;
+
+  create trigger on_auth_user_created
+    after insert on auth.users
+    for each row execute function public.handle_new_user();
+end $$;
+
 
 -- =========================
 -- (Removido) Usuário Administrador inicial
