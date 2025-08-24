@@ -1,50 +1,474 @@
 // modules/processos.js
 // Siglas (expansão):
-// - CRUD: Create, Read, Update, Delete (Criar, Ler, Atualizar, Excluir)
-// - RLS: Row Level Security (Segurança em nível de linha)
+// - CRUD: Create/Read/Update/Delete (Criar/Ler/Atualizar/Excluir)
+// - RLS: Row Level Security (Segurança por Linha no banco)
+// - JWT: JSON Web Token (token do usuário autenticado)
 
 import { supabase } from "../supabaseClient.js";
 
-/* =========================
-   Constantes de domínio
-   ========================= */
-const TIPOS = ["PDIR", "Inscrição/Alteração", "Exploração", "OPEA"];
-const STATUS = [
-  "Análise Documental", "Análise Técnica Preliminar", "Análise Técnica",
-  "Parecer ATM", "Parecer DT", "Notificação", "Revisão OACO", "Aprovação",
-  "Sobrestado Documental", "Sobrestado Técnico", "Análise ICA",
-  "Publicação de Portaria", "Concluído", "Remoção/Rebaixamento", "Término de Obra"
-];
-
-/* =========================
-   Máscara / validação NUP
-   ========================= */
-function onlyDigits17(value) {
-  return (value || "").replace(/\D/g, "").slice(0, 17);
+// Utilitário: formata NUP (00000.000000/0000-00) apenas para exibição
+function formatNUP(n) {
+  const d = (n || '').replace(/\D/g, '');
+  return d.replace(/^(\d{5})(\d{6})(\d{4})(\d{2})$/, '$1.$2/$3-$4');
 }
-function maskNUP(digits) {
-  const d = onlyDigits17(digits);
-  const len = d.length;
-  if (len === 0) return "";
-  if (len <= 5)  return d;
-  if (len <= 11) return d.slice(0, 5) + "." + d.slice(5);
-  if (len <= 15) return d.slice(0, 5) + "." + d.slice(5, 11) + "/" + d.slice(11);
-  return d.slice(0, 5) + "." + d.slice(5, 11) + "/" + d.slice(11, 15) + "-" + d.slice(15, 17);
-}
-const isFullNUP = (v) => onlyDigits17(v).length === 17;
 
-/* =========================
-   Acesso Supabase (CRUD)
-   ========================= */
-async function getProcessoByNup(nup) {
+// =====================
+// Estado do módulo
+// =====================
+let state = {
+  // Tabela (lista de processos)
+  pageSize: 50,          // quantidade por página na paginação infinita
+  hasMore: true,         // se ainda há páginas a carregar
+  lastCursor: null,      // { updated_at: timestamptz, id: uuid } da última linha carregada
+  allList: [],           // dados brutos acumulados das páginas
+  viewData: [],          // dados prontos para render (com campos de exibição)
+  order: {               // ordenação visual (por coluna)
+    col: "nup",          // coluna inicial
+    dir: "asc",          // "asc" ou "desc"
+  },
+
+  // Seleção atual para formulário + histórico
+  selected: null,        // processo selecionado (objeto)
+  historico: [],         // histórico do processo selecionado
+
+  // Controles de UI
+  isFetching: false,
+  isSaving: false,
+  isDeleting: false,
+  searchNUP: "",         // campo NUP do formulário (apenas números)
+  lockStatus: true,      // bloqueia edição do status se for processo já existente
+  lockTipoEEntrada: true,// bloqueia tipo e 1ª entrada quando já existente
+  currentAction: "idle", // "idle" | "editing" | "creating"
+
+  // Cache de filtros/ordenadores por coluna
+  sorters: {},
+};
+
+// =====================
+// Helpers de datas/prazos
+// =====================
+
+function parseDateInput(yyyy_mm_dd) {
+  // Converte "2025-08-24" (string) para Date (local) às 00:00
+  if (!yyyy_mm_dd) return null;
+  const [y, m, d] = yyyy_mm_dd.split("-").map(x => parseInt(x, 10));
+  const dt = new Date(y, (m || 1) - 1, d || 1);
+  return isNaN(dt.getTime()) ? null : dt;
+}
+
+function formatDate(d) {
+  // Exibe data no formato DD/MM/AAAA
+  if (!d) return "";
+  const dt = (d instanceof Date) ? d : new Date(d);
+  if (isNaN(dt.getTime())) return "";
+  const dd = String(dt.getDate()).padStart(2, "0");
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const yyyy = dt.getFullYear();
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+function addDays(date, days) {
+  const dt = new Date(date);
+  dt.setDate(dt.getDate() + days);
+  return dt;
+}
+
+// Calcula o "Prazo Regional" (60 dias) considerando eventos de sobrestado
+function computePrazoRegional(processo, historico) {
+  // Regra:
+  // - Prazo corre por 60 dias a partir de "1ª Entrada Regional" (entrada_regional).
+  // - Se houver status "Sobrestado Documental" ou "Sobrestado Técnico", o prazo fica pausado
+  //   e é reiniciado (60 dias) a partir da data de saída do sobrestado (quando houve mudança
+  //   do status "Sobrestado ..." para outro).
+  // - Se o status atual for "Sobrestado ...", exibir "Sobrestado".
+  // Observação: a SPA exibe "Sobrestado" diretamente na lista quando status for sobrestado.
+
+  const st = (processo?.status || "").toLowerCase();
+  const isSobrestado = st.includes("sobrestado");
+
+  // Se atual está sobrestado, exibe "Sobrestado"
+  if (isSobrestado) return "Sobrestado";
+
+  // Verifica a data base: a última "saída de sobrestado" ou a "entrada_regional"
+  let base = processo?.entrada_regional ? new Date(processo.entrada_regional) : null;
+  if (!base) return ""; // sem entrada, sem prazo
+
+  // Percorre histórico por ordem cronológica (changed_at asc)
+  const hist = [...(historico || [])].sort((a, b) => new Date(a.changed_at) - new Date(b.changed_at));
+
+  // Estamos "dentro" de sobrestado?
+  let inHold = false;
+  let holdStartedAt = null;
+
+  for (const ev of hist) {
+    const ns = (ev.new_status || "").toLowerCase();
+
+    // Entrada em sobrestado
+    if (ns.includes("sobrestado")) {
+      inHold = true;
+      holdStartedAt = new Date(ev.changed_at);
+      continue;
+    }
+    // Saída de sobrestado (estávamos em hold e mudou para outro status)
+    if (inHold && !ns.includes("sobrestado")) {
+      // Reinicia prazo a partir da "saída do hold"
+      const saiuEm = new Date(ev.changed_at);
+      base = saiuEm;
+      inHold = false;
+      holdStartedAt = null;
+    }
+  }
+
+  // Caso esteja em hold até agora, exibe "Sobrestado" (mas acima já teríamos retornado)
+  // De qualquer forma, aqui reforçamos:
+  if (inHold) return "Sobrestado";
+
+  // Calcula base + 60
+  const prazo = addDays(base, 60);
+  return formatDate(prazo);
+}
+
+// =====================
+// Helpers de NUP (form)
+// =====================
+
+// Mantém apenas dígitos e limita a 17
+function onlyDigits17(v) {
+  return (v || "").replace(/\D/g, "").slice(0, 17);
+}
+
+// Ao digitar, formata parcialmente como NUP 00000.000000/0000-00
+function maskNUPProgressive(vdigits) {
+  const v = onlyDigits17(vdigits);
+  // 5-6-4-2
+  let r = v;
+  if (v.length > 5)   r = v.slice(0, 5) + "." + v.slice(5);
+  if (v.length > 11)  r = r.slice(0, 12) + "." + r.slice(12);
+  if (v.length > 17)  r = r.slice(0, 19) + "/" + r.slice(19);
+  if (v.length > 21)  r = r.slice(0, 24) + "-" + r.slice(24);
+  // Acima é agressivo ao contar inserções; para simplicidade progressiva, fazemos outra forma:
+  const d = (v || "");
+  const p1 = d.slice(0,5);
+  const p2 = d.slice(5,11);
+  const p3 = d.slice(11,15);
+  const p4 = d.slice(15,17);
+  const a = [];
+  if (p1) a.push(p1);
+  if (p2) a.push(p2);
+  let s = a.length > 1 ? a[0]+"."+a[1] : (a[0]||"");
+  if (p3) s = (s ? s+"/" : "") + p3;
+  if (p4) s = s + "-" + p4;
+  return s;
+}
+
+// =====================
+// Supabase helpers
+// =====================
+
+async function getSession() {
+  const { data } = await supabase.auth.getSession();
+  return data?.session || null;
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// =====================
+// Renderização de UI
+// =====================
+
+function cssOnce() {
+  if (document.getElementById("processos-css")) return;
+  const st = document.createElement("style");
+  st.id = "processos-css";
+  st.textContent = `
+    /* Layout principal (form em 1 linha; área dividida em 65% processos / 35% histórico) */
+    .proc-wrap { display:flex; flex-direction:column; gap:8px; width:100%; height:calc(100vh - 120px); }
+    .proc-title { margin:0; font-size:18px; }
+    .proc-form { display:flex; flex-wrap:wrap; align-items:flex-end; gap:8px; width:100%; }
+    .proc-form > div { display:flex; flex-direction:column; }
+    .proc-form label { font-size:12px; margin-bottom:4px; }
+
+    .proc-rows { display:flex; gap:8px; width:100%; height:100%; overflow:hidden; }
+    .proc-left  { width:65%; height:100%; display:flex; flex-direction:column; }
+    .proc-right { width:35%; height:100%; display:flex; flex-direction:column; }
+
+    /* Tabela de processos */
+    .proc-table-wrap { flex:1; min-height:0; overflow:auto; } /* rolagem vertical interna */
+    .proc-table { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .proc-table th, .proc-table td {
+      border-bottom:1px solid #ddd; padding:6px; font-size:12px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .proc-table thead th { position:sticky; top:0; background:#fff; z-index:1; }
+    /* Larguras específicas: sem rolagem lateral */
+    .col-nup { width: 165px; } /* suficiente para 00000.000000/0000-00 */
+    .col-tipo { width: 120px; }
+    .col-entrada { width: 130px; } /* 1ª Entrada Regional (em duas linhas no header) */
+    .col-status { width: 160px; }
+    .col-prazo { width: 120px; }   /* Prazo Regional (em duas linhas no header) */
+    .col-atualizado { width: 130px; }
+    .col-por { width: 160px; }
+    .col-acoes { width: 120px; }
+
+    .sort-wrap { display:flex; flex-direction:column; gap:2px; align-items:center; }
+    .sort-wrap button { height:18px; padding:0 4px; line-height:18px; font-size:10px; }
+
+    /* Histórico à direita */
+    .hist-wrap { flex:1; min-height:0; overflow:auto; }
+    .hist-table { width:100%; border-collapse:collapse; table-layout:fixed; }
+    .hist-table th, .hist-table td {
+      border-bottom:1px solid #ddd; padding:6px; font-size:12px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .hist-table thead th { position:sticky; top:0; background:#fff; z-index:1; }
+    .hist-col-dh { width: 150px; } /* mais estreita conforme pedido */
+    .hist-col-acao { width: 220px; }
+    .hist-col-por { width: 200px; }
+
+    /* Botões menores */
+    .btn { height:32px; }
+  `;
+  document.head.appendChild(st);
+}
+
+function render(container) {
+  cssOnce();
+
+  container.innerHTML = `
+    <div class="proc-wrap">
+      <h3 class="proc-title">Gestão de Processos</h3>
+
+      <div class="proc-form">
+        <div>
+          <label>Insira o NUP do Processo</label>
+          <input id="nup-input" placeholder="00000.000000/0000-00" />
+        </div>
+        <div><label>&nbsp;</label><button id="btn-buscar" class="btn">Buscar</button></div>
+        <div><label>&nbsp;</label><button id="btn-limpar-nup" class="btn">Limpar</button></div>
+
+        <div>
+          <label>Tipo</label>
+          <select id="tipo-select" disabled>
+            <option value="">Selecione</option>
+            <option>PDIR</option>
+            <option>Inscrição/Alteração</option>
+            <option>Exploração</option>
+            <option>OPEA</option>
+          </select>
+        </div>
+
+        <div>
+          <label>1ª Entrada Regional</label>
+          <input id="entrada-input" type="date" disabled />
+        </div>
+
+        <div>
+          <label>Status</label>
+          <select id="status-select" disabled>
+            <option value="">Selecione</option>
+            <option>Em Tratamento</option>
+            <option>Finalizado</option>
+            <option>Sobrestado Documental</option>
+            <option>Sobrestado Técnico</option>
+          </select>
+        </div>
+
+        <div><label>&nbsp;</label><button id="btn-salvar" class="btn" disabled>Salvar</button></div>
+        <div><label>&nbsp;</label><button id="btn-excluir" class="btn" disabled>Excluir</button></div>
+      </div>
+
+      <div class="proc-rows">
+        <div class="proc-left">
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <h4 style="margin:4px 0;">Processos</h4>
+            <div id="list-msg" class="small"></div>
+          </div>
+
+          <div class="proc-table-wrap">
+            <table class="proc-table">
+              <thead>
+                <tr>
+                  <th class="col-nup">
+                    <div>NUP</div>
+                    <div class="sort-wrap">
+                      <button data-sort-col="nup" data-sort-dir="asc">▲</button>
+                      <button data-sort-col="nup" data-sort-dir="desc">▼</button>
+                    </div>
+                  </th>
+                  <th class="col-tipo">
+                    <div>Tipo</div>
+                    <div class="sort-wrap">
+                      <button data-sort-col="tipo" data-sort-dir="asc">▲</button>
+                      <button data-sort-col="tipo" data-sort-dir="desc">▼</button>
+                    </div>
+                  </th>
+                  <th class="col-entrada">
+                    <div>1ª Entrada<br/>Regional</div>
+                    <div class="sort-wrap">
+                      <button data-sort-col="entrada_regional" data-sort-dir="asc">▲</button>
+                      <button data-sort-col="entrada_regional" data-sort-dir="desc">▼</button>
+                    </div>
+                  </th>
+                  <th class="col-status">
+                    <div>Status</div>
+                    <div class="sort-wrap">
+                      <button data-sort-col="status" data-sort-dir="asc">▲</button>
+                      <button data-sort-col="status" data-sort-dir="desc">▼</button>
+                    </div>
+                  </th>
+                  <th class="col-prazo">
+                    <div>Prazo<br/>Regional</div>
+                    <div class="sort-wrap">
+                      <button data-sort-col="prazo_regional" data-sort-dir="asc">▲</button>
+                      <button data-sort-col="prazo_regional" data-sort-dir="desc">▼</button>
+                    </div>
+                  </th>
+                  <th class="col-atualizado">
+                    <div>Atualizado em</div>
+                    <div class="sort-wrap">
+                      <button data-sort-col="updated_at" data-sort-dir="asc">▲</button>
+                      <button data-sort-col="updated_at" data-sort-dir="desc">▼</button>
+                    </div>
+                  </th>
+                  <th class="col-por">
+                    <div>Atualizado por</div>
+                    <div class="sort-wrap">
+                      <button data-sort-col="atualizado_por" data-sort-dir="asc">▲</button>
+                      <button data-sort-col="atualizado_por" data-sort-dir="desc">▼</button>
+                    </div>
+                  </th>
+                  <th class="col-acoes"><div>Ações</div></th>
+                </tr>
+              </thead>
+              <tbody id="tb-lista"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="proc-right">
+          <div style="display:flex; align-items:center; justify-content:space-between;">
+            <h4 id="hist-title" style="margin:4px 0;">Histórico</h4>
+            <div id="hist-msg" class="small"></div>
+          </div>
+
+          <div class="hist-wrap">
+            <table class="hist-table">
+              <thead>
+                <tr>
+                  <th class="hist-col-dh">Data/Hora</th>
+                  <th class="hist-col-acao">Ação</th>
+                  <th class="hist-col-por">Por</th>
+                </tr>
+              </thead>
+              <tbody id="tb-hist"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// =====================
+// Supabase: Data Access
+// =====================
+
+// Paginação: carrega a primeira página (ordenada por updated_at desc, id desc)
+async function fetchFirstPage() {
+  state.isFetching = true;
+  state.hasMore = true;
+  state.lastCursor = null;
+  state.allList = [];
+
   const { data, error } = await supabase
     .from("processos")
     .select("*")
-    .eq("nup", nup)
-    .maybeSingle();
+    .order("updated_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(state.pageSize);
+
+  state.isFetching = false;
   if (error) throw error;
+
+  state.allList = data || [];
+  if (!data || data.length < state.pageSize) {
+    state.hasMore = false;
+  } else {
+    const last = data[data.length - 1];
+    state.lastCursor = { updated_at: last.updated_at, id: last.id };
+  }
+
+  // Mapeia para view data
+  recomputeViewData();
+}
+
+// Próximas páginas (cursor: < updated_at, depois < id)
+async function fetchNextPage() {
+  if (!state.hasMore || state.isFetching || !state.lastCursor) return;
+  state.isFetching = true;
+
+  const { updated_at: cursorTime, id: cursorId } = state.lastCursor;
+  const { data, error } = await supabase
+    .from("processos")
+    .select("*")
+    .or(`and(updated_at.lt.${cursorTime},id.gte.00000000-0000-0000-0000-000000000000),and(updated_at.eq.${cursorTime},id.lt.${cursorId})`)
+    .order("updated_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(state.pageSize);
+
+  state.isFetching = false;
+  if (error) throw error;
+
+  const rows = data || [];
+  state.allList = state.allList.concat(rows);
+
+  if (rows.length < state.pageSize) {
+    state.hasMore = false;
+  } else {
+    const last = rows[rows.length - 1];
+    state.lastCursor = { updated_at: last.updated_at, id: last.id };
+  }
+
+  recomputeViewData();
+}
+
+// Busca processo por NUP (17 dígitos). Se achar, seleciona, carrega histórico e move a linha para o topo da lista.
+async function findByNUP(nupDigits17) {
+  if (!nupDigits17 || nupDigits17.length !== 17) {
+    throw new Error("Informe o NUP com 17 algarismos.");
+  }
+
+  const { data, error } = await supabase
+    .from("processos")
+    .select("*")
+    .eq("nup", nupDigits17)
+    .single();
+
+  if (error && error.code !== "PGRST116") { // PGRST116: no rows
+    throw error;
+  }
+
+  if (!data) return null;
+
+  // Se foi encontrado, posiciona no topo da lista visual
+  const idx = state.allList.findIndex(p => p.id === data.id);
+  if (idx !== -1) {
+    const [found] = state.allList.splice(idx, 1);
+    state.allList.unshift(found);
+  } else {
+    // Se não estava carregado (página não tinha), coloca como primeiro mesmo assim
+    state.allList.unshift(data);
+  }
+
+  // Define seleção e carrega histórico
+  state.selected = data;
+  await getHistorico(data.id);
+
+  // Atualiza viewData
+  recomputeViewData();
+
   return data;
 }
+
+// Cria processo novo
 async function createProcesso(payload) {
   const { data, error } = await supabase
     .from("processos")
@@ -54,6 +478,8 @@ async function createProcesso(payload) {
   if (error) throw error;
   return data;
 }
+
+// Atualiza apenas status
 async function updateStatus(id, newStatus) {
   const { data, error } = await supabase
     .from("processos")
@@ -64,749 +490,498 @@ async function updateStatus(id, newStatus) {
   if (error) throw error;
   return data;
 }
+
+// Exclui processo (e o histórico é removido pelo ON DELETE CASCADE)
 async function deleteProcesso(id) {
-  const { error } = await supabase.from("processos").delete().eq("id", id);
+  const { error } = await supabase
+    .from("processos")
+    .delete()
+    .eq("id", id);
   if (error) throw error;
-  return true;
 }
-async function getHistorico(processoId) {
+
+// Carrega histórico do processo (ordenado por changed_at desc)
+async function getHistorico(id) {
   const { data, error } = await supabase
     .from("status_history")
     .select("*")
-    .eq("processo_id", processoId)
+    .eq("processo_id", id)
     .order("changed_at", { ascending: false });
   if (error) throw error;
-  return data;
-}
-async function getHistoricoBatch(ids) {
-  if (!ids.length) return [];
-  const { data, error } = await supabase
-    .from("status_history")
-    .select("processo_id, old_status, new_status, changed_at, changed_by_email, changed_by")
-    .in("processo_id", ids);
-  if (error) throw error;
-  return data;
+  state.historico = data || [];
 }
 
-/* =========================
-   Cálculo Prazo Regional
-   ========================= */
-const SOBRESTADOS = new Set(["Sobrestado Técnico", "Sobrestado Documental"]);
-const DIA_MS = 24 * 60 * 60 * 1000;
+// =====================
+// Mapeamento p/ View
+// =====================
 
-function calcularPrazosMapa(processos, historicos) {
-  // última saída de sobrestado por processo
-  const saidaSobMap = new Map();
-  for (const h of historicos) {
-    const saiuDeSob = SOBRESTADOS.has(h.old_status) && !SOBRESTADOS.has(h.new_status);
-    if (saiuDeSob) {
-      const t = new Date(h.changed_at).getTime();
-      const prev = saidaSobMap.get(h.processo_id);
-      if (!prev || t > prev) saidaSobMap.set(h.processo_id, t);
+function recomputeViewData() {
+  // Ordenação visual (client-side) baseada em state.order
+  const { col, dir } = state.order;
+  const asc = dir === "asc";
+
+  // Prepara linhas para a tabela
+  const list = (state.allList || []).map(row => {
+    const p = { ...row };
+
+    // "Prazo Regional" para exibição
+    const prazo =
+      (p.status || "").toLowerCase().includes("sobrestado")
+        ? "Sobrestado"
+        : computePrazoRegional(p, state.selected && state.selected.id === p.id ? state.historico : []);
+
+    // "Atualizado por" (email simples) — se quiser exibir nome, precisará buscar profiles
+    let atualizado_por = "";
+    if (p.modificado_por) {
+      // A SPA mostra e-mail do autor via histórico; aqui deixamos placeholder (será sobrescrito ao clicar)
+      atualizado_por = ""; 
     }
+
+    return {
+      id: p.id,
+      nup: p.nup,
+      tipo: p.tipo,
+      entrada_regional: p.entrada_regional ? formatDate(p.entrada_regional) : "",
+      status: p.status,
+      prazo_regional: prazo,
+      updated_at: p.updated_at ? formatDate(p.updated_at) : "",
+      atualizado_por,
+      raw: p,
+    };
+  });
+
+  // Ordena (client-side)
+  list.sort((a, b) => {
+    const va = a[col] || "";
+    const vb = b[col] || "";
+    if (col === "updated_at" || col === "entrada_regional") {
+      // datas no formato DD/MM/AAAA — normaliza para AAAA-MM-DD para comparar
+      const na = va ? va.split("/").reverse().join("-") : "";
+      const nb = vb ? vb.split("/").reverse().join("-") : "";
+      return asc ? (na.localeCompare(nb)) : (nb.localeCompare(na));
+    }
+    return asc ? (String(va).localeCompare(String(vb))) : (String(vb).localeCompare(String(va)));
+  });
+
+  state.viewData = list;
+  renderList();
+  renderHistTitle();
+  renderHistorico();
+}
+
+// =====================
+// Render: Lista
+// =====================
+
+function renderList() {
+  const $tb = document.getElementById("tb-lista");
+  const $msg = document.getElementById("list-msg");
+  if (!$tb) return;
+
+  const rows = state.viewData || [];
+
+  if (!rows.length) {
+    $tb.innerHTML = `
+      <tr><td colspan="8" style="text-align:center; padding:12px;">Nenhum processo encontrado.</td></tr>
+    `;
+    $msg.textContent = "";
+    return;
   }
-  const prazos = new Map();
-  for (const p of processos) {
-    let base = p.entrada_regional ? new Date(p.entrada_regional) : null;
-    const tSaida = saidaSobMap.get(p.id);
-    if (tSaida) {
-      const dt = new Date(tSaida);
-      if (!base || dt > base) base = dt;
-    }
-    prazos.set(
-      p.id,
-      base ? new Date(base.getTime() + 60 * DIA_MS).toISOString().slice(0, 10) : ""
-    );
-  }
-  return prazos;
-}
-function calcularPrazoUnit(p, hist = []) {
-  if (SOBRESTADOS.has(p.status)) return "Sobrestado";
-  let base = p.entrada_regional ? new Date(p.entrada_regional) : null;
-  for (const h of hist) {
-    const saiuDeSob = SOBRESTADOS.has(h.old_status) && !SOBRESTADOS.has(h.new_status);
-    if (saiuDeSob) {
-      const t = new Date(h.changed_at);
-      if (!base || t > base) base = t;
-    }
-  }
-  return base ? new Date(base.getTime() + 60 * DIA_MS).toISOString().slice(0, 10) : "";
-}
 
-/* =========================
-   CSS (grid, rolagens, etc.)
-   ========================= */
-function ensureLayoutCSS() {
-  if (document.getElementById("proc-grid-css")) return;
-  const style = document.createElement("style");
-  style.id = "proc-grid-css";
-  style.textContent = `
-    /* Sem rolagem de página */
-    html, body { overflow: hidden; }
-
-    .proc-mod { display:flex; flex-direction:column; overflow:hidden; }
-
-    /* Formulário compacto */
-    .proc-form-card { flex:0 0 auto; padding-top:8px; padding-bottom:8px; }
-    .proc-form-row { display:flex; align-items:flex-end; gap:8px; flex-wrap:nowrap; overflow:auto; }
-    .proc-form-row > div { display:flex; flex-direction:column; }
-    .proc-form-row label { font-size:0.95rem; margin-bottom:2px; }
-    .proc-form-row input, .proc-form-row select, .proc-form-row button { height:34px; }
-
-    /* Split 35%/65% */
-    .proc-split { display:flex; gap:10px; overflow:hidden; }
-    .proc-pane { min-width:0; display:flex; flex-direction:column; overflow:hidden; }
-    .hist-pane { flex:0 0 35%; }
-    .grid-pane { flex:1 1 65%; }
-    .pane-title { margin:0 0 8px 0; }
-    .pane-body { flex:1 1 auto; min-height:0; overflow:hidden; display:flex; } /* rolagem interna */
-
-    /* Grid de processos */
-    :root{
-      --w-nup: clamp(20ch, 22ch, 26ch);
-      --w-tipo: clamp(8ch, 10ch, 14ch);
-      --w-entrada: clamp(10ch, 12ch, 16ch);
-      --w-prazo: clamp(8ch, 10ch, 12ch);
-    }
-
-    #grid{ flex:1 1 auto; min-height:0; display:flex; }
-    .grid-scroll { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; position:relative; }
-
-    .proc-grid-header,
-    .proc-grid-row{
-      display: grid;
-      grid-template-columns:
-        var(--w-nup)
-        var(--w-tipo)
-        minmax(0, 1.4fr)
-        var(--w-entrada)
-        var(--w-prazo)
-        minmax(0, 1fr)
-        minmax(0, 1fr);
-      gap: 0;
-      align-items: center;
-    }
-    .proc-grid-header{
-      position: sticky; top: 0; z-index: 3;
-      background:#fff; border-bottom:1px solid #ddd;
-    }
-    .proc-grid-header > div,
-    .proc-grid-row > div{
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      text-align: center;
-      padding: 4px 6px;
-      font-size: 12px;
-    }
-
-    /* Título + botões (ordenadores) empilhados */
-    .hdc { display:flex; flex-direction:column; align-items:center; gap:2px; }
-    .hdc .title { line-height:1.05; }
-    .sort-wrap { display:inline-flex; gap:2px; }
-    .sort-btn { border:1px solid #ccc; background:#f7f7f7; padding:0 4px; line-height:16px; height:18px; cursor:pointer; }
-    .sort-btn.active { background:#e9e9e9; font-weight:bold; }
-
-    .proc-grid-row.row-selected { outline:2px solid #999; outline-offset:-1px; }
-
-    /* Histórico */
-    :root{
-      --w-hist-data: clamp(12ch, 16ch, 18ch);
-      --w-hist-autor: clamp(16ch, 20ch, 24ch);
-    }
-    .hist-scroll { height:100%; overflow-y:auto; overflow-x:hidden; }
-
-    .hist-header,
-    .hist-row{
-      display:grid;
-      grid-template-columns:
-        var(--w-hist-data)
-        minmax(0, 1fr)
-        minmax(0, 1fr)
-        var(--w-hist-autor);
-      gap:0;
-      align-items:center;
-    }
-    .hist-header{
-      position: sticky; top: 0; z-index:2;
-      background:#fff; border-bottom:1px solid #ddd;
-    }
-    .hist-header > div, .hist-row > div{
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      text-align: center;
-      padding: 4px 6px;
-      font-size: 12px;
-    }
-  `;
-  document.head.appendChild(style);
-}
-
-function applyHeights(root) {
-  const mod = root.querySelector(".proc-mod");
-  const split = root.querySelector(".proc-split");
-  if (!mod || !split) return;
-
-  const top = mod.getBoundingClientRect().top;
-  const available = window.innerHeight - top - 12;
-  mod.style.height = available + "px";
-
-  const formH = root.querySelector(".proc-form-card").getBoundingClientRect().height;
-  split.style.height = (available - formH - 10) + "px";
-}
-
-/* =========================
-   UI helpers (ordenadores)
-   ========================= */
-function headerCell(key, labelHtml, sort) {
-  return `
-    <div class="hdc" data-sort-key="${key}">
-      <span class="title" data-k="${key}" style="cursor:pointer">${labelHtml}</span>
-      <span class="sort-wrap">
-        <button class="sort-btn ${sort.key===key && sort.dir==='asc' ? 'active':''}" data-k="${key}" data-d="asc">▲</button>
-        <button class="sort-btn ${sort.key===key && sort.dir==='desc' ? 'active':''}" data-k="${key}" data-d="desc">▼</button>
-      </span>
-    </div>
-  `;
-}
-
-/* =========================
-   VIEW: tabela de processos
-   ========================= */
-function viewTabela(listView, sort) {
-  const header = `
-    <div class="proc-grid-header">
-      ${headerCell("nup","NUP",sort)}
-      ${headerCell("tipo","Tipo",sort)}
-      ${headerCell("status","Status",sort)}
-      ${headerCell("entrada","1ª Entrada<br>Regional",sort)}
-      ${headerCell("prazo","Prazo<br>Regional",sort)}
-      ${headerCell("atualizadoPor","Atualizado por",sort)}
-      ${headerCell("atualizado","Atualizado em",sort)}
-    </div>
-  `;
-  const body = listView.map(v => `
-    <div class="proc-grid-row" data-id="${v.id}" data-nup="${v.nup}">
-      <div>${v.nup}</div>
-      <div>${v.tipo}</div>
-      <div>${v.status}</div>
-      <div>${v.entrada || ""}</div>
-      <div>${v.prazoDisplay}</div>
-      <div class="small">${v.atualizadoPor || ""}</div>
-      <div class="small">${v.atualizadoStr}</div>
-    </div>
+  $tb.innerHTML = rows.map(v => `
+    <tr data-id="${v.id}" class="row-proc">
+      <td class="col-nup">${formatNUP(v.nup)}</td>
+      <td class="col-tipo">${v.tipo || ""}</td>
+      <td class="col-entrada">${v.entrada_regional || ""}</td>
+      <td class="col-status">${v.status || ""}</td>
+      <td class="col-prazo">${v.prazo_regional || ""}</td>
+      <td class="col-atualizado">${v.updated_at || ""}</td>
+      <td class="col-por">${v.atualizado_por || ""}</td>
+      <td class="col-acoes"><button class="btn btn-ver">Ver</button></td>
+    </tr>
   `).join("");
 
-  return `<div class="grid-scroll">${header}${body}</div>`;
+  $msg.textContent = `${rows.length} processo(s) em memória. Role para carregar mais.`;
+
+  // Bind "Ver" e clique na linha
+  document.querySelectorAll(".row-proc .btn-ver").forEach(btn => {
+    btn.onclick = async (e) => {
+      const tr = e.target.closest("tr");
+      const id = tr?.getAttribute("data-id");
+      if (!id) return;
+      const found = state.allList.find(p => p.id === id);
+      if (found) {
+        state.selected = found;
+        // move para o topo
+        const idx = state.allList.findIndex(p => p.id === id);
+        if (idx !== -1) {
+          const [row] = state.allList.splice(idx, 1);
+          state.allList.unshift(row);
+        }
+        await getHistorico(found.id);
+        recomputeViewData();
+        fillFormFromSelected();
+      }
+    };
+  });
+
+  // Clique na linha também seleciona
+  document.querySelectorAll(".row-proc").forEach(tr => {
+    tr.onclick = async (e) => {
+      if ((e.target || {}).classList?.contains("btn-ver")) return;
+      const id = tr.getAttribute("data-id");
+      const found = state.allList.find(p => p.id === id);
+      if (found) {
+        state.selected = found;
+        // move para o topo
+        const idx = state.allList.findIndex(p => p.id === id);
+        if (idx !== -1) {
+          const [row] = state.allList.splice(idx, 1);
+          state.allList.unshift(row);
+        }
+        await getHistorico(found.id);
+        recomputeViewData();
+        fillFormFromSelected();
+      }
+    };
+  });
+
+  // Scroll infinito: ao chegar perto do fim, carrega próxima página
+  const wrap = document.querySelector(".proc-table-wrap");
+  if (wrap) {
+    wrap.onscroll = async () => {
+      if (state.isFetching || !state.hasMore) return;
+      const nearBottom = wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 200;
+      if (nearBottom) {
+        try {
+          await fetchNextPage();
+        } catch (e) {
+          console.error("Erro ao paginar:", e);
+        }
+      }
+    };
+  }
 }
 
-/* =========================
-   VIEW: histórico (grid)
-   ========================= */
-function viewHistorico(title, hist) {
-  const header = `
-    <div class="hist-header">
-      <div>Data/Hora</div><div>De</div><div>Para</div><div>Por</div>
-    </div>
-  `;
-  const rows = (hist || []).map(h => {
-    const autor = h.changed_by_email || h.changed_by || "(desconhecido)";
-    const quando = new Date(h.changed_at).toLocaleString();
-    const de = h.old_status ?? "(criação)";
-    const para = h.new_status ?? "(sem status)";
-    return `<div class="hist-row"><div>${quando}</div><div>${de}</div><div>${para}</div><div>${autor}</div></div>`;
+// =====================
+// Render: Histórico
+// =====================
+
+function renderHistTitle() {
+  const $title = document.getElementById("hist-title");
+  if (!$title) return;
+  if (!state.selected) {
+    $title.textContent = `Histórico`;
+    return;
+  }
+  const nup = state.selected?.nup || "";
+  $title.textContent = `Histórico — ${formatNUP(nup)}`;
+}
+
+function renderHistorico() {
+  const $tb = document.getElementById("tb-hist");
+  const $msg = document.getElementById("hist-msg");
+  if (!$tb) return;
+
+  if (!state.selected) {
+    $tb.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:12px;">Nenhum processo selecionado.</td></tr>`;
+    $msg.textContent = "";
+    return;
+  }
+
+  const rows = (state.historico || []).map(h => ({
+    ...h,
+    when: h.changed_at ? new Date(h.changed_at) : null,
+  }));
+
+  if (!rows.length) {
+    $tb.innerHTML = `<tr><td colspan="3" style="text-align:center; padding:12px;">Sem histórico.</td></tr>`;
+    $msg.textContent = "";
+    return;
+  }
+
+  const fmtDH = (d) => {
+    if (!d) return "";
+    const dd = String(d.getDate()).padStart(2, "0");
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const yyyy = d.getFullYear();
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+  };
+
+  $tb.innerHTML = rows.map(h => {
+    const acao = (h.old_status ? `Status: ${h.old_status} → ${h.new_status}` : `Criação: ${h.new_status}`);
+    const por  = h.changed_by_email || "(desconhecido)";
+    return `
+      <tr>
+        <td class="hist-col-dh">${fmtDH(h.when)}</td>
+        <td class="hist-col-acao">${acao}</td>
+        <td class="hist-col-por">${por}</td>
+      </tr>
+    `;
   }).join("");
 
-  return `
-    <h3 class="pane-title">${title}</h3>
-    <div class="pane-body">
-      <div class="hist-scroll">
-        ${header}
-        ${rows || `<div class="hist-row"><div colspan="4">Sem histórico.</div></div>`}
-      </div>
-    </div>
-  `;
+  $msg.textContent = `${rows.length} registro(s).`;
 }
 
-/* =========================
-   Formulário
-   ========================= */
-function viewFormulario() {
-  return `
-    <div class="card proc-form-card">
-      <div class="proc-form-row">
-        <div style="min-width:260px; flex:1 1 260px">
-          <label>Insira o NUP do Processo</label>
-          <input id="f-nup" inputmode="numeric" autocomplete="off" placeholder="00000.000000/0000-00" />
-        </div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-buscar">Buscar</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-limpar" type="button">Limpar</button></div>
-        <div style="min-width:180px; flex:1 1 180px">
-          <label>Tipo</label>
-          <select id="f-tipo" disabled>
-            <option value="" disabled selected hidden>-- selecione --</option>
-            ${TIPOS.map(t => `<option value="${t}">${t}</option>`).join("")}
-          </select>
-        </div>
-        <div style="min-width:160px; flex:1 1 160px">
-          <label>1ª Entrada Regional</label>
-          <input id="f-entrada" type="date" disabled />
-        </div>
-        <div style="min-width:200px; flex:1 1 200px">
-          <label>Status</label>
-          <select id="f-status" disabled>
-            <option value="" disabled selected hidden>-- selecione --</option>
-            ${STATUS.map(s => `<option value="${s}">${s}</option>`).join("")}
-          </select>
-        </div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-salvar" disabled>Salvar</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-excluir" disabled>Excluir</button></div>
-      </div>
-      <div id="msg-novo" class="small" style="margin-top:6px"></div>
-    </div>
-  `;
-}
+// =====================
+// Formulário
+// =====================
 
-/* =========================
-   Bind da tabela (click/ordenar)
-   ========================= */
-function bindTabela(container, refresh, onPickRow) {
-  // clique nas linhas
-  container.querySelectorAll(".proc-grid-row").forEach(row => {
-    const id = row.getAttribute("data-id");
-    const nup = row.getAttribute("data-nup");
-    row.addEventListener("click", async () => {
-      onPickRow(id);
-      try {
-        container.querySelectorAll(".proc-grid-row").forEach(r => r.classList.remove("row-selected"));
-        row.classList.add("row-selected");
-        const hist = await getHistorico(id);
-        const pane = document.getElementById("hist-pane");
-        pane.innerHTML = viewHistorico(`Histórico — ${nup}`, hist);
-      } catch (e) {
-        alert("Erro ao carregar histórico: " + e.message);
-      }
-    });
-  });
+function bindForm(container) {
+  const $nup = container.querySelector("#nup-input");
+  const $btnBuscar = container.querySelector("#btn-buscar");
+  const $btnLimparNUP = container.querySelector("#btn-limpar-nup");
+  const $tipo = container.querySelector("#tipo-select");
+  const $entrada = container.querySelector("#entrada-input");
+  const $status = container.querySelector("#status-select");
+  const $salvar = container.querySelector("#btn-salvar");
+  const $excluir = container.querySelector("#btn-excluir");
 
-  // ordenação
-  container.querySelectorAll(".sort-btn").forEach(btn => {
-    btn.addEventListener("click", (ev) => {
-      const k = btn.getAttribute("data-k");
-      const d = btn.getAttribute("data-d");
-      container.dispatchEvent(new CustomEvent("sortchange", { detail: { key:k, dir:d } }));
-      ev.stopPropagation();
-    });
-  });
-  container.querySelectorAll(".hdc .title").forEach(lbl => {
-    lbl.addEventListener("click", () => {
-      const k = lbl.getAttribute("data-k");
-      container.dispatchEvent(new CustomEvent("sorttoggle", { detail: { key:k } }));
-    });
-  });
-}
+  // Regras:
+  // - Ao carregar: apenas NUP ativo, demais campos bloqueados e vazios
+  // - Clicar "Buscar":
+  //   * Se encontrar processo: tipo/entrada exibem valores e bloqueados; status habilitado
+  //   * Se não encontrar: pergunta se cria; se "Não" limpa NUP; se "Sim" habilita campos e salva exige tudo preenchido
+  // - Botão "Excluir": disponível quando tiver processo encontrado
+  // - "Salvar": habilita quando status mudar (processo existente) ou quando criando (todos campos obrigatórios)
 
-/* =========================
-   Paginação (keyset) + scroll
-   ========================= */
-const PAGE_SIZE = 200; // tamanho da página
-
-async function fetchPageByCursor(cursor) {
-  // Estratégia: duas consultas para emular keyset (evita OR complexo no PostgREST)
-  // 1) updated_at < cursor.updated_at
-  // 2) updated_at = cursor.updated_at AND id < cursor.id
-  if (!cursor) {
-    const { data, error } = await supabase
-      .from("processos")
-      .select("*")
-      .order("updated_at", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(PAGE_SIZE);
-    if (error) throw error;
-    return pack(data || []);
-  } else {
-    const { data: part1, error: e1 } = await supabase
-      .from("processos")
-      .select("*")
-      .lt("updated_at", cursor.updated_at)
-      .order("updated_at", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(PAGE_SIZE);
-    if (e1) throw e1;
-
-    const remain = Math.max(0, PAGE_SIZE - (part1?.length || 0));
-    let part2 = [];
-    if (remain > 0) {
-      const { data: eqdata, error: e2 } = await supabase
-        .from("processos")
-        .select("*")
-        .eq("updated_at", cursor.updated_at)
-        .lt("id", cursor.id)
-        .order("updated_at", { ascending: false })
-        .order("id", { ascending: false })
-        .limit(remain);
-      if (e2) throw e2;
-      part2 = eqdata || [];
+  function resetForm(keepNUP=false) {
+    if (!keepNUP) {
+      state.searchNUP = "";
+      $nup.value = "";
     }
-    const rows = [...(part1 || []), ...part2];
-    return pack(rows);
+    $tipo.value = "";
+    $entrada.value = "";
+    $status.value = "";
+    $tipo.disabled = true;
+    $entrada.disabled = true;
+    $status.disabled = true;
+    $salvar.disabled = true;
+    $excluir.disabled = true;
+
+    state.selected = null;
+    state.historico = [];
+    renderHistTitle();
+    renderHistorico();
   }
 
-  function pack(rows) {
-    const nextCursor = rows.length
-      ? { updated_at: rows[rows.length - 1].updated_at, id: rows[rows.length - 1].id }
-      : null;
-    return { data: rows, nextCursor };
-  }
+  // Máscara de digitação do NUP
+  $nup.addEventListener("input", (e) => {
+    const raw = e.target.value;
+    const digits = onlyDigits17(raw);
+    state.searchNUP = digits;
+    e.target.value = maskNUPProgressive(digits);
+  });
+
+  // Buscar
+  $btnBuscar.onclick = async () => {
+    const d = state.searchNUP;
+    if (!d || d.length !== 17) {
+      alert("Informe o NUP com 17 algarismos.");
+      return;
+    }
+    try {
+      const found = await findByNUP(d);
+      if (!found) {
+        if (confirm("Processo não encontrado, gostaria de criar?")) {
+          // habilita criação
+          state.currentAction = "creating";
+          $tipo.disabled = false;
+          $entrada.disabled = false;
+          $status.disabled = false;
+          $salvar.disabled = false;
+          $excluir.disabled = true;
+
+          // limpa campos
+          $tipo.value = "";
+          $entrada.value = "";
+          $status.value = "";
+        } else {
+          resetForm(false); // limpa inclusive o NUP
+        }
+        return;
+      }
+
+      // Encontrado → preenche e trava tipo/entrada; habilita status
+      state.currentAction = "editing";
+      fillFormFromSelected();
+      $salvar.disabled = true; // só habilitar se status mudar
+      $excluir.disabled = false;
+
+      $tipo.disabled = true;
+      $entrada.disabled = true;
+      $status.disabled = false;
+
+    } catch (e) {
+      alert("Erro ao buscar: " + e.message);
+    }
+  };
+
+  // Limpar NUP
+  $btnLimparNUP.onclick = () => {
+    resetForm(false);
+  };
+
+  // Salvar
+  $salvar.onclick = async () => {
+    if (state.currentAction === "creating") {
+      // precisa de todos os campos
+      const digits = state.searchNUP;
+      const tipo = $tipo.value;
+      const entrada = $entrada.value;
+      const status = $status.value;
+      if (!digits || digits.length !== 17 || !tipo || !entrada || !status) {
+        alert("Preencha NUP (17 dígitos), Tipo, 1ª Entrada Regional e Status.");
+        return;
+      }
+      const payload = {
+        nup: digits,
+        tipo,
+        entrada_regional: entrada,
+        status,
+      };
+      try {
+        state.isSaving = true;
+        const row = await createProcesso(payload);
+
+        // insere no topo e seleciona
+        state.allList.unshift(row);
+        state.selected = row;
+        await getHistorico(row.id);
+
+        // bloqueia tipo/entrada; status liberado
+        $tipo.disabled = true;
+        $entrada.disabled = true;
+        $status.disabled = false;
+        state.currentAction = "editing";
+        recomputeViewData();
+        fillFormFromSelected();
+
+      } catch (e) {
+        alert("Erro ao criar: " + e.message);
+      } finally {
+        state.isSaving = false;
+      }
+      return;
+    }
+
+    if (state.currentAction === "editing" && state.selected) {
+      const currentStatus = state.selected.status || "";
+      const newStatus = $status.value || "";
+      if (!newStatus) {
+        alert("Selecione um status.");
+        return;
+      }
+      if (newStatus === currentStatus) {
+        alert("O status não foi alterado.");
+        return;
+      }
+      try {
+        state.isSaving = true;
+        const up = await updateStatus(state.selected.id, newStatus);
+        // Atualiza na lista
+        const idx = state.allList.findIndex(p => p.id === up.id);
+        if (idx !== -1) state.allList[idx] = up; else state.allList.unshift(up);
+        state.selected = up;
+        await getHistorico(up.id);
+        recomputeViewData();
+        fillFormFromSelected();
+      } catch (e) {
+        alert("Erro ao atualizar status: " + e.message);
+      } finally {
+        state.isSaving = false;
+      }
+    }
+  };
+
+  // Mudança de status → habilita Salvar (somente quando em edição)
+  $status.addEventListener("change", () => {
+    if (state.currentAction === "editing" && state.selected) {
+      const current = state.selected.status || "";
+      const next = $status.value || "";
+      document.getElementById("btn-salvar").disabled = (current === next);
+    }
+  });
+
+  // Excluir
+  $excluir.onclick = async () => {
+    if (!state.selected) return;
+    if (!confirm("Confirma excluir o processo selecionado? Esta ação não pode ser desfeita.")) return;
+    try {
+      state.isDeleting = true;
+      await deleteProcesso(state.selected.id);
+      // Remove da lista em memória
+      state.allList = state.allList.filter(p => p.id !== state.selected.id);
+      state.selected = null;
+      state.historico = [];
+      recomputeViewData();
+      resetForm(true); // mantém o NUP digitado
+    } catch (e) {
+      alert("Erro ao excluir: " + e.message);
+    } finally {
+      state.isDeleting = false;
+    }
+  };
+
+  // Inicial: apenas NUP habilitado
+  resetForm(true);
 }
 
-/* =========================
-   Módulo principal
-   ========================= */
+function fillFormFromSelected() {
+  const sel = state.selected;
+  if (!sel) return;
+  const $nup = document.getElementById("nup-input");
+  const $tipo = document.getElementById("tipo-select");
+  const $entrada = document.getElementById("entrada-input");
+  const $status = document.getElementById("status-select");
+  const $salvar = document.getElementById("btn-salvar");
+  const $excluir = document.getElementById("btn-excluir");
+
+  // Mostra NUP mascarado no input, mas mantém state.searchNUP apenas dígitos
+  state.searchNUP = (sel.nup || "").replace(/\D/g, "").slice(0,17);
+  $nup.value = maskNUPProgressive(state.searchNUP);
+
+  $tipo.value = sel.tipo || "";
+  $entrada.value = sel.entrada_regional ? String(sel.entrada_regional).slice(0,10) : "";
+  $status.value = sel.status || "";
+
+  // Ao carregar um existente: tipo/entrada bloqueados; status editável
+  $tipo.disabled = true;
+  $entrada.disabled = true;
+  $status.disabled = false;
+  $salvar.disabled = true; // só habilita quando modificar status
+  $excluir.disabled = false;
+}
+
+// =====================
+// Ordenação visual
+// =====================
+
+function bindSorters() {
+  document.querySelectorAll(".sort-wrap button").forEach(btn => {
+    btn.onclick = () => {
+      const col = btn.getAttribute("data-sort-col");
+      const dir = btn.getAttribute("data-sort-dir");
+      state.order = { col, dir };
+      recomputeViewData();
+    };
+  });
+}
+
+// =====================
+// Export do módulo
+// =====================
+
 export default {
   id: "processos",
   title: "Processos",
   route: "#/processos",
   async view(container) {
-    ensureLayoutCSS();
-
-    container.innerHTML = `
-      <div class="container proc-mod">
-        ${viewFormulario()}
-        <div class="proc-split">
-          <div class="card proc-pane hist-pane" id="hist-pane">
-            ${viewHistorico("Histórico", [])}
-          </div>
-          <div class="card proc-pane grid-pane" id="grid-pane">
-            <h3 class="pane-title">Lista de processos</h3>
-            <div class="pane-body">
-              <div id="grid">Carregando...</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    `;
-
-    // refs
-    const el = (s) => container.querySelector(s);
-    const $nup = el("#f-nup");
-    const $tipo = el("#f-tipo");
-    const $entrada = el("#f-entrada");
-    const $status = el("#f-status");
-    const $buscar = el("#btn-buscar");
-    const $limpar = el("#btn-limpar");
-    const $salvar = el("#btn-salvar");
-    const $excluir = el("#btn-excluir");
-    const $msg = el("#msg-novo");
-    const gridWrap = el("#grid");
-    const histPane = el("#hist-pane");
-    const root = container;
-
-    // estado
-    let currentAction = null;   // 'update' | 'create' | null
-    let currentRowId = null;
-    let originalStatus = null;
-    let pendingNup = "";
-    let currentNupMasked = "";
-
-    let allList = [];
-    let prazosMap = new Map();
-    let viewData = [];
-    let pinnedId = null; // para fixar no topo após busca
-
-    // paginação (keyset)
-    let cursor = null;
-    let hasNext = true;
-    let loadingPage = false;
-
-    const sort = { key:"atualizado", dir:"desc" };
-
-    // Alturas/rolagem interna
-    const resizeAll = () => applyHeights(root);
-    window.addEventListener("resize", resizeAll);
-    setTimeout(resizeAll, 0);
-
-    // Máscara NUP
-    $nup.addEventListener("input", () => { $nup.value = maskNUP(onlyDigits17($nup.value)); });
-
-    // Helpers de formulário
-    function resetForm(clearNup=false) {
-      $msg.textContent = "";
-      if (clearNup) $nup.value = "";
-      $tipo.value = ""; $entrada.value = ""; $status.value = "";
-      $tipo.disabled = true; $entrada.disabled = true; $status.disabled = true;
-      $salvar.disabled = true; $excluir.disabled = true;
-      currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
-      pinnedId = null; // remove o pino ao limpar
-    }
-    function setCreateMode(nupMasked) {
-      pendingNup = nupMasked; currentNupMasked = nupMasked;
-      $msg.textContent = "Preencha os campos e clique em Salvar.";
-      $tipo.disabled = false; $entrada.disabled = false; $status.disabled = false;
-      $salvar.disabled = false; $excluir.disabled = true;
-      histPane.innerHTML = viewHistorico("Histórico", []);
-    }
-    function setUpdateMode(row) {
-      currentAction = "update"; currentRowId = row.id; originalStatus = row.status; currentNupMasked = row.nup;
-      $tipo.value = row.tipo || ""; $entrada.value = row.entrada_regional || ""; $status.value = row.status || "";
-      $tipo.disabled = true; $entrada.disabled = true; $status.disabled = false;
-      $salvar.disabled = true; $excluir.disabled = false;
-      $msg.textContent = "Processo encontrado. Altere o Status se necessário ou veja o Histórico.";
-    }
-    function perguntaCriar(on) {
-      $msg.innerHTML = `Processo não encontrado, gostaria de criar?
-        <button id="btn-sim" style="margin-left:8px">Sim</button>
-        <button id="btn-nao" style="margin-left:4px">Não</button>`;
-      el("#btn-sim").onclick = () => on(true);
-      el("#btn-nao").onclick = () => on(false);
-    }
-    function validarObrigatoriosParaCriar() {
-      if (!$tipo.value) { alert("Selecione o Tipo."); return false; }
-      if (!$entrada.value) { alert("Informe a 1ª Entrada Regional."); return false; }
-      if (!$status.value) { alert("Selecione o Status."); return false; }
-      return true;
-    }
-    $status.addEventListener("change", () => {
-      if (currentAction === "update") $salvar.disabled = ($status.value === originalStatus || !$status.value);
-    });
-
-    // viewData (mapeia allList -> grid)
-    function buildViewData() {
-      viewData = allList.map(r => {
-        const prazoStr = SOBRESTADOS.has(r.status) ? "Sobrestado" : (prazosMap.get(r.id) || "");
-        return {
-          id: r.id,
-          nup: r.nup, tipo: r.tipo, status: r.status,
-          entrada: r.entrada_regional || "",
-          atualizadoPor: r.modificado_por || "",
-          atualizado: r.updated_at ? new Date(r.updated_at).getTime() : 0,
-          atualizadoStr: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
-          prazoDisplay: prazoStr,
-          prazoTS: prazoStr && prazoStr !== "Sobrestado" ? new Date(prazoStr).getTime() : null,
-          entradaTS: r.entrada_regional ? new Date(r.entrada_regional).getTime() : null
-        };
-      });
-    }
-    function applySort() {
-      const key = sort.key, dir = sort.dir === "asc" ? 1 : -1;
-      const val = (v) => {
-        switch (key) {
-          case "nup": return v.nup || "";
-          case "tipo": return v.tipo || "";
-          case "status": return v.status || "";
-          case "entrada": return v.entradaTS ?? -Infinity;
-          case "prazo": return (v.prazoDisplay === "Sobrestado") ? Number.POSITIVE_INFINITY : (v.prazoTS ?? Number.POSITIVE_INFINITY);
-          case "atualizadoPor": return v.atualizadoPor || "";
-          case "atualizado": return v.atualizado ?? 0;
-          default: return "";
-        }
-      };
-      const arr = viewData.slice();
-      arr.sort((a,b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * dir);
-
-      // pino vai para o topo
-      if (pinnedId != null) {
-        const idx = arr.findIndex(v => String(v.id) === String(pinnedId));
-        if (idx > 0) {
-          const [item] = arr.splice(idx, 1);
-          arr.unshift(item);
-        }
-      }
-      return arr;
-    }
-
-    function renderGrid() {
-      const view = applySort();
-      gridWrap.innerHTML = viewTabela(view, sort);
-      bindTabela(gridWrap, refreshFirstPage, onPickRowFromList);
-
-      // eventos de ordenação
-      gridWrap.addEventListener("sortchange", (ev) => {
-        sort.key = ev.detail.key;
-        sort.dir = ev.detail.dir;
-        renderGrid();
-      });
-      gridWrap.addEventListener("sorttoggle", (ev) => {
-        const k = ev.detail.key;
-        if (sort.key === k) sort.dir = sort.dir === "asc" ? "desc" : "asc";
-        else { sort.key = k; sort.dir = "asc"; }
-        renderGrid();
-      });
-
-      // liga o infinite scroll
-      attachInfiniteScroll();
-      // mantém linha selecionada (se houver)
-      if (currentRowId) {
-        gridWrap.querySelectorAll(".proc-grid-row").forEach(r => {
-          if (r.getAttribute("data-id") === String(currentRowId)) r.classList.add("row-selected");
-        });
-      }
-    }
-
-    function renderGridPreservandoScroll() {
-      const sc = gridWrap.querySelector(".grid-scroll");
-      const st = sc ? sc.scrollTop : 0;
-      renderGrid();
-      const sc2 = gridWrap.querySelector(".grid-scroll");
-      if (sc2) sc2.scrollTop = st;
-    }
-
-    function onPickRowFromList(id) {
-      const row = allList.find(r => String(r.id) === String(id));
-      if (!row) return;
-      setUpdateMode(row);
-      $nup.value = row.nup;
-      currentRowId = row.id;
-      // não fixa pino no clique (só na busca)
-    }
-
-    // garante que um processo buscado apareça no topo
-    async function upsertPinnedRow(row) {
-      if (!allList.some(r => String(r.id) === String(row.id))) {
-        allList.push(row);
-        const hist = await getHistorico(row.id);
-        const prazo = calcularPrazoUnit(row, hist);
-        prazosMap.set(row.id, prazo);
-        buildViewData();
-      }
-      pinnedId = row.id;
-      renderGridPreservandoScroll();
-    }
-
-    // Scroll infinito
-    function attachInfiniteScroll() {
-      const sc = gridWrap.querySelector(".grid-scroll");
-      if (!sc || sc.__bound) return;
-      sc.__bound = true;
-      sc.addEventListener("scroll", async () => {
-        if (loadingPage || !hasNext) return;
-        const nearBottom = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 200;
-        if (nearBottom) {
-          await fetchNextPage();
-        }
-      });
-    }
-
-    // Carregamento incremental
-    async function assimilateRows(rows) {
-      if (!rows || !rows.length) return;
-      allList = allList.concat(rows);
-      const ids = rows.map(r => r.id);
-      const historicos = await getHistoricoBatch(ids);
-      const prazosSub = calcularPrazosMapa(rows, historicos);
-      prazosSub.forEach((v, k) => prazosMap.set(k, v));
-      buildViewData();
-      renderGridPreservandoScroll();
-    }
-
-    async function fetchFirstPage() {
-      loadingPage = true;
-      try {
-        const { data, nextCursor } = await fetchPageByCursor(null);
-        cursor = nextCursor;
-        hasNext = !!nextCursor && (data?.length || 0) > 0;
-        allList = []; prazosMap = new Map(); viewData = [];
-        await assimilateRows(data || []);
-      } finally {
-        loadingPage = false;
-      }
-    }
-
-    async function fetchNextPage() {
-      if (!hasNext || loadingPage) return;
-      loadingPage = true;
-      try {
-        const { data, nextCursor } = await fetchPageByCursor(cursor);
-        cursor = nextCursor;
-        hasNext = !!nextCursor && (data?.length || 0) > 0;
-        await assimilateRows(data || []);
-      } finally {
-        loadingPage = false;
-      }
-    }
-
-    async function refreshFirstPage() {
-      // recarrega a primeira página (após salvar/excluir)
-      pinnedId = null;
-      await fetchFirstPage();
-    }
-
-    // Ações do formulário
-    const buscar = async () => {
-      if (!isFullNUP($nup.value)) {
-        $msg.textContent = "Informe um NUP completo (17 dígitos)."; $nup.focus(); return;
-      }
-      const nupMasked = maskNUP(onlyDigits17($nup.value));
-      $msg.textContent = "Buscando...";
-      try {
-        const row = await getProcessoByNup(nupMasked);
-        if (row) {
-          setUpdateMode(row);
-          currentRowId = row.id;
-          await upsertPinnedRow(row); // garante a 1ª linha
-          const hist = await getHistorico(row.id);
-          histPane.innerHTML = viewHistorico(`Histórico — ${row.nup}`, hist);
-        } else {
-          perguntaCriar((decisao) => {
-            if (decisao) setCreateMode(nupMasked);
-            else { resetForm(true); histPane.innerHTML = viewHistorico("Histórico", []); $nup.focus(); }
-          });
-        }
-      } catch (e) {
-        $msg.textContent = "Erro ao buscar: " + e.message;
-      }
-    };
-
-    $buscar.addEventListener("click", buscar);
-    $limpar.addEventListener("click", () => {
-      resetForm(true);
-      histPane.innerHTML = viewHistorico("Histórico", []);
-      renderGridPreservandoScroll();
-      $msg.textContent = "NUP limpo.";
-      $nup.focus();
-    });
-
-    $salvar.addEventListener("click", async () => {
-      try {
-        if (currentAction === "update") {
-          if ($status.value === originalStatus || !$status.value) { alert("Altere o Status para salvar."); return; }
-          await updateStatus(currentRowId, $status.value);
-          $msg.textContent = "Status atualizado com sucesso.";
-          originalStatus = $status.value; $salvar.disabled = true;
-          await refreshFirstPage();
-          const hist = await getHistorico(currentRowId);
-          histPane.innerHTML = viewHistorico(`Histórico — ${currentNupMasked}`, hist);
-        } else if (currentAction === "create") {
-          if (!validarObrigatoriosParaCriar()) return;
-          const payload = {
-            nup: pendingNup,
-            tipo: $tipo.value,
-            status: $status.value,
-            entrada_regional: $entrada.value
-          };
-          const novo = await createProcesso(payload);
-          $msg.textContent = "Processo criado com sucesso.";
-          setUpdateMode(novo); currentRowId = novo.id;
-          await refreshFirstPage();
-          const hist = await getHistorico(novo.id);
-          histPane.innerHTML = viewHistorico(`Histórico — ${novo.nup}`, hist);
-        } else {
-          alert("Use o botão Buscar antes de salvar.");
-        }
-      } catch (e) { alert("Erro ao salvar: " + e.message); }
-    });
-
-    $excluir.addEventListener("click", async () => {
-      if (currentAction !== "update" || !currentRowId) { alert("Busque um processo existente antes de excluir."); return; }
-      if (!confirm("Tem certeza que deseja excluir este processo? Esta ação não pode ser desfeita.")) return;
-      try {
-        await deleteProcesso(currentRowId);
-        $msg.textContent = "Processo excluído com sucesso.";
-        resetForm(true); histPane.innerHTML = viewHistorico("Histórico", []);
-        await refreshFirstPage(); $nup.focus();
-      } catch (e) { alert("Erro ao excluir: " + e.message); }
-    });
+    render(container);
+    bindForm(container);
+    bindSorters();
 
     // Inicialização
     await fetchFirstPage();
