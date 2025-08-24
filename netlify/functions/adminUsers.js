@@ -41,7 +41,8 @@ export async function handler(event) {
 
     const url = new URL(event.rawUrl);
     const method = event.httpMethod;
-
+    const action = url.searchParams.get('action');
+    
     // LISTAR perfis (paginado simples)
     if (method === 'GET') {
       const page = Number(url.searchParams.get('page') || '1');
@@ -56,6 +57,22 @@ export async function handler(event) {
         .range(from, to);
       if (error) throw error;
       return json(200, { data });
+    }
+
+    // RESETAR senha (envia link de recuperação por e-mail)
+    if (method === 'POST' && action === 'reset') {
+      const body = JSON.parse(event.body || '{}');
+      const { email } = body;
+      if (!email) return json(400, { error: 'email é obrigatório' });
+
+      const { data: link, error: e1 } = await supaAdmin.auth.admin.generateLink({
+        type: 'recovery',
+        email
+      });
+      if (e1) throw e1;
+
+      // O Supabase envia e-mail automaticamente (se SMTP configurado).
+      return json(200, { ok: true, sent: true });
     }
 
     // CRIAR usuário
@@ -120,22 +137,6 @@ export async function handler(event) {
       if (e2) throw e2;
 
       return json(200, { ok: true });
-    }
-
-    // RESETAR senha (envia link de recuperação por e-mail)
-    if (method === 'POST' && (new URL(event.rawUrl)).searchParams.get('action') === 'reset') {
-      const body = JSON.parse(event.body || '{}');
-      const { email } = body;
-      if (!email) return json(400, { error: 'email é obrigatório' });
-
-      const { data: link, error: e1 } = await supaAdmin.auth.admin.generateLink({
-        type: 'recovery',
-        email
-      });
-      if (e1) throw e1;
-
-      // O Supabase envia e-mail automaticamente (se SMTP configurado).
-      return json(200, { ok: true, sent: true });
     }
 
     // EXCLUIR usuário
