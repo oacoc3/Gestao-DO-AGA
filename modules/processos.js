@@ -386,6 +386,8 @@ function bindTabela(container, refresh, onPickRow) {
     const nup = row.getAttribute("data-nup");
     row.addEventListener("click", async () => {
       onPickRow(id);
+      const nupInput = document.getElementById("f-nup");
+      if (nupInput) nupInput.value = formatNUP(nup);
       try {
         container.querySelectorAll(".proc-grid-row").forEach(r => r.classList.remove("row-selected"));
         row.classList.add("row-selected");
