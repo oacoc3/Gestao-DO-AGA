@@ -41,15 +41,20 @@ async function authFetch(input, init = {}) {
 }
 
 // ---------- LISTA ----------
-async function carregarLista(){
-  // Força POST (action=list) e manda token no body
-  const { data:{ session } } = await supabase.auth.getSession();
-  const token = session?.access_token || null;
+async function carregarLista() {
+  // pega o token atual
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token || "";
 
-  const resp = await authFetch("/.netlify/functions/adminUsers?action=list", {
-    method:"POST",
-    body: JSON.stringify({ page: state.page, size: state.size, token })
+  // envie o token também pela querystring (auth=...)
+  const url = `/.netlify/functions/adminUsers?action=list&auth=${encodeURIComponent(token)}`;
+
+  // e mantenha o POST normal (page/size no body, headers já são montados por authFetch)
+  const resp = await authFetch(url, {
+    method: "POST",
+    body: JSON.stringify({ page: state.page, size: state.size })
   });
+
   if (!resp.ok) {
     const txt = await resp.text();
     throw new Error(`Falha ao carregar usuários: ${resp.status} ${txt}`);
