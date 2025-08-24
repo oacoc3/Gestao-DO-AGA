@@ -1,0 +1,18 @@
+-- Marca o usuário como Administrador no app_metadata
+update auth.users
+set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb)
+                         || jsonb_build_object('perfil','Administrador')
+where email = 'macedocsm@fab.mil.br';
+
+-- (opcional) grava também em user_metadata, se quiser vizualizar em outros lugares
+update auth.users
+set raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb)
+                         || jsonb_build_object('perfil','Administrador')
+where email = 'macedocsm@fab.mil.br';
+
+-- (opcional) garante o registro na sua tabela profiles com o perfil Administrador
+insert into public.profiles (id, email, perfil)
+select id, email, 'Administrador'
+from auth.users
+where email = 'macedocsm@fab.mil.br'
+on conflict (id) do update set perfil = excluded.perfil;
