@@ -156,6 +156,12 @@ export async function handler(event) {
           perfil,
           must_change_password: true,
         });
+      // 4) envia e-mail para cadastro da senha
+      const { error: e3 } = await supaAdmin.auth.admin.generateLink({
+        type: 'recovery',
+        email,
+      });
+      if (e3) throw e3;
       if (e2) throw e2;
 
       return json(201, { ok: true, id: created.user.id });
