@@ -164,17 +164,24 @@ export default {
         payload.id = id;
         method = "PUT";
       }
-      await fetch("/.netlify/functions/adminUsers", {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
-      msg.textContent = "Dados salvos.";
-      form.reset();
-      await fetchUsers();
+      try {
+        const res = await fetch("/.netlify/functions/adminUsers", {
+          method,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Falha ao salvar.");
+        msg.textContent = "Dados salvos.";
+        form.reset();
+        await fetchUsers();
+      } catch (err) {
+        console.error(err);
+        msg.textContent = err.message || "Falha ao salvar.";
+      }
     };
 
     document.getElementById("cancelar").onclick = () => {
