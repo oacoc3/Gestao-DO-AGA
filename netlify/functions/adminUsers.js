@@ -12,6 +12,13 @@ const supaAdmin = createClient(
   { auth: { autoRefreshToken: false, persistSession: false } }
 );
 
+// Remove campos indefinidos para evitar erros de validação da API
+function clean(obj) {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([_, v]) => v !== undefined && v !== null)
+  );
+}
+
 function json(status, body) {
   return {
     statusCode: status,
@@ -90,13 +97,17 @@ export async function handler(event) {
       if (!email || !perfil) return json(400, { error: 'email e perfil são obrigatórios' });
 
       // Cria no Auth com perfil no app_metadata
-      const { data: created, error: e1 } = await supaAdmin.auth.admin.createUser({
+      const userMeta = clean({ full_name, nome_guerra, posto_graduacao });
+      const appMeta = clean({ perfil });
+      const params = {
         email,
         password: password || crypto.randomUUID(), // senha temporária se não informada
-        email_confirm: true,
-        user_metadata: { full_name, nome_guerra, posto_graduacao },
-        app_metadata: { perfil }
-      });
+        email_confirm: true
+      };
+      if (Object.keys(userMeta).length) params.user_metadata = userMeta;
+      if (Object.keys(appMeta).length) params.app_metadata = appMeta;
+
+      const { data: created, error: e1 } = await supaAdmin.auth.admin.createUser(params);
       if (e1) throw e1;
 
       // Registra/atualiza em public.profiles
@@ -124,8 +135,10 @@ export async function handler(event) {
 
       const updates = {};
       if (email) updates.email = email;
-      updates.user_metadata = { full_name, nome_guerra, posto_graduacao };
-      if (perfil) updates.app_metadata = { perfil };
+      const userMeta = clean({ full_name, nome_guerra, posto_graduacao });
+      if (Object.keys(userMeta).length) updates.user_metadata = userMeta;
+      const appMeta = clean({ perfil });
+      if (Object.keys(appMeta).length) updates.app_metadata = appMeta;
 
       const { error: e1 } = await supaAdmin.auth.admin.updateUserById(id, updates);
       if (e1) throw e1;
@@ -154,7 +167,11 @@ export async function handler(event) {
 
     return json(404, { error: 'Rota não encontrada' });
   } catch (err) {
-    const status = err?.status || 500;
-    return json(status, { error: err?.message || String(err) });
+    const status = err?.status || err?.statusCode || (err?.name === 'ZodError' ? 400 : 500);
+    let message = err?.message || String(err);
+    if (err?.name === 'ZodError') {
+      message = err.errors?.map(e => e.message).join('; ') || message;
+    }
+    return json(status, { error: message });
   }
 }
