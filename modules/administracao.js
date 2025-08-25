@@ -183,8 +183,5 @@ export default {
     };
 
     await fetchUsers();
-        </div>
-      </div>
-    `;
   },
 };
