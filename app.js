@@ -2,7 +2,7 @@
 import { supabase } from "./supabaseClient.js";
 import { startRouter, addRoute } from "./router.js";
 import { getModules, buildNav } from "./modules/index.js";
-// IMPORT CORRETO PARA NAVEGADOR (ESM = ECMAScript Module)
+// Import ESM (ECMAScript Module) direto da CDN para uso no navegador
 import { createClient as createSbClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const appContainer = document.getElementById("app");
@@ -12,9 +12,21 @@ const authArea = document.getElementById("auth-area");
 let currentModules = [];
 
 /* ========= Utilidades de URL (Uniform Resource Locator) ========= */
-function isRecoveryLink() {
+function getAuthFlowType() {
   const url = new URL(window.location.href);
-  return url.hash.includes("type=recovery") || url.searchParams.get("type") === "recovery";
+  const hash = url.hash;
+  const q = url.searchParams.get("type");
+  // podemos receber no hash (#) ou na query (?)
+  const t =
+    (hash.includes("type=recovery") && "recovery") ||
+    (hash.includes("type=invite") && "invite") ||
+    (q === "recovery" && "recovery") ||
+    (q === "invite" && "invite") ||
+    null;
+  return t;
+}
+function isAuthLink() {
+  return !!getAuthFlowType();
 }
 function clearAuthParamsFromUrl() {
   const keepHash = window.location.hash.startsWith("#/") ? window.location.hash : "";
@@ -30,7 +42,7 @@ function extractTokensFromUrl() {
   };
 }
 
-/* ========= Cliente isolado (sem persistir sessão, em memória) ========= */
+/* ========= Cliente isolado (não persiste sessão; evita “logar” outras abas) ========= */
 function makeMemoryStorage() {
   const store = {};
   return {
@@ -44,19 +56,22 @@ function getRecoveryClient() {
   if (recoveryClient) return recoveryClient;
   recoveryClient = createSbClient(window.ENV.SUPABASE_URL, window.ENV.SUPABASE_ANON_KEY, {
     auth: {
-      persistSession: false,      // não toca no localStorage
+      persistSession: false,      // não escreve no localStorage
       autoRefreshToken: false,
-      detectSessionInUrl: false,  // vamos setar sessão manualmente
+      detectSessionInUrl: false,  // vamos setar manualmente
       storage: makeMemoryStorage()
     },
   });
   return recoveryClient;
 }
-async function ensureRecoverySession() {
+async function ensureAuthSessionForThisTab() {
   const rc = getRecoveryClient();
+
+  // já tem sessão neste cliente?
   const { data: g } = await rc.auth.getSession();
   if (g?.session) return rc;
 
+  // cria sessão só nesta aba a partir dos tokens da URL
   const { access_token, refresh_token } = extractTokensFromUrl();
   if (!access_token || !refresh_token) return null;
 
@@ -117,7 +132,7 @@ async function renderAuthArea(session) {
       </form>
       <div id="auth-msg" class="small"></div>
     `;
-    navEl.innerHTML = "";
+    navEl.innerHTML = ""; // esconde menu quando deslogado
     const loginForm = document.getElementById("login-form");
     const forgotForm = document.getElementById("forgot-form");
     const msg = document.getElementById("auth-msg");
@@ -144,15 +159,15 @@ async function renderAuthArea(session) {
       e.preventDefault();
       msg.textContent = "Enviando...";
       const email = document.getElementById("forgot-email").value.trim();
-      const redirectTo = window.location.origin + window.location.pathname; // raiz da SPA
+      const redirectTo = window.location.origin + window.location.pathname;
       const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
       msg.textContent = error ? ("Erro: " + error.message) : "E-mail enviado.";
     };
   }
 }
 
-/* ========= Tela de redefinição (usa o cliente isolado) ========= */
-function renderPasswordReset(rc) {
+/* ========= Tela de “definir nova senha” (serve para invite e recovery) ========= */
+function renderSetPassword(rc, flowType /* 'invite' | 'recovery' */) {
   navEl.innerHTML = "";
   authArea.innerHTML = `
       <form id="reset-form" style="display:flex; gap:8px; align-items:center">
@@ -160,7 +175,9 @@ function renderPasswordReset(rc) {
         <input id="conf-pass" type="password" placeholder="confirmar senha" />
         <button type="submit">Salvar</button>
       </form>
-      <div id="auth-msg" class="small"></div>
+      <div class="small" id="auth-msg">${
+        flowType === "invite" ? "Convite aceito: defina sua senha para ativar a conta." : "Defina sua nova senha."
+      }</div>
     `;
   const form = document.getElementById("reset-form");
   const msg = document.getElementById("auth-msg");
@@ -174,9 +191,11 @@ function renderPasswordReset(rc) {
       const { error } = await rc.auth.updateUser({ password: p1 });
       if (error) { msg.textContent = "Erro: " + error.message; return; }
 
+      // Sucesso: limpa a URL, encerra a sessão isolada e volta ao login
       clearAuthParamsFromUrl();
-      await rc.auth.signOut();   // encerra a sessão só deste cliente em memória
+      await rc.auth.signOut();
       msg.textContent = "Senha alterada. Faça login novamente.";
+
       await renderAuthArea(null);
       guardRoutes(null);
     } catch (err) {
@@ -203,19 +222,22 @@ function guardRoutes(session) {
 /* ========= Fluxo inicial ========= */
 const { data: { session } } = await supabase.auth.getSession();
 
-if (isRecoveryLink()) {
-  const rc = await ensureRecoverySession(); // cria sessão só nesta aba
-  renderPasswordReset(rc || getRecoveryClient());
-  guardRoutes(null);
+const flow = getAuthFlowType();
+if (flow) {
+  // Cria sessão **apenas nesta aba** para permitir updateUser()
+  const rc = await ensureAuthSessionForThisTab();
+  renderSetPassword(rc || getRecoveryClient(), flow);
+  guardRoutes(null); // não carrega módulos enquanto define a senha
 } else {
   await setupModules(session);
   await renderAuthArea(session);
   guardRoutes(session);
 }
 
-/* ========= Eventos de sessão ========= */
+/* ========= Eventos de sessão (JWT: JSON Web Token) ========= */
 supabase.auth.onAuthStateChange(async (event, sessionNow) => {
-  if (isRecoveryLink()) return; // ignora eventos enquanto estiver no fluxo de recuperação
+  // Durante invite/recovery, ignoramos eventos como SIGNED_IN para não “sair” da tela
+  if (isAuthLink()) return;
   await setupModules(sessionNow);
   await renderAuthArea(sessionNow);
   guardRoutes(sessionNow);
