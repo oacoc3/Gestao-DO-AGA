@@ -9,19 +9,44 @@ const authArea = document.getElementById("auth-area");
 
 let currentModules = [];
 
-/* Utilitário: estamos num link de recuperação? */
+/* ==== Utilidades de URL (Uniform Resource Locator) ==== */
 function isRecoveryLink() {
   const url = new URL(window.location.href);
-  // Supabase envia "type=recovery" no hash (#) e pode aparecer também na query (?type=)
+  // Supabase manda "type=recovery" no hash (#) e, às vezes, também na query (?)
   return url.hash.includes("type=recovery") || url.searchParams.get("type") === "recovery";
 }
 
-/* Utilitário: limpa o hash e a query da URL (remove access_token, type=recovery, etc.) */
+function extractTokensFromUrl() {
+  // Tokens podem vir no hash (#access_token=...) ou na query (?access_token=...)
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const queryParams = new URLSearchParams(window.location.search);
+
+  const access_token = hashParams.get("access_token") || queryParams.get("access_token");
+  const refresh_token = hashParams.get("refresh_token") || queryParams.get("refresh_token");
+  const type = hashParams.get("type") || queryParams.get("type");
+
+  return { access_token, refresh_token, type };
+}
+
+/* Remove access_token/refresh_token/type=recovery da URL */
 function clearAuthParamsFromUrl() {
-  const clean = window.location.origin + window.location.pathname + (window.location.hash.startsWith("#/") ? window.location.hash : "");
+  const keepHash = window.location.hash.startsWith("#/") ? window.location.hash : "";
+  const clean = window.location.origin + window.location.pathname + keepHash;
   window.history.replaceState({}, document.title, clean);
 }
 
+/* Cria a sessão de recuperação somente nesta aba, se necessário */
+async function ensureRecoverySession() {
+  const { access_token, refresh_token } = extractTokensFromUrl();
+  if (!access_token || !refresh_token) return { ok: false, reason: "missing_tokens" };
+
+  // Seta a sessão localmente para permitir updateUser({ password })
+  const { data, error } = await supabase.auth.setSession({ access_token, refresh_token });
+  if (error) return { ok: false, reason: error.message };
+  return { ok: true, session: data.session };
+}
+
+/* ==== Módulos ==== */
 async function setupModules(session) {
   let perfil = session?.user?.app_metadata?.perfil;
   if (session?.user) {
@@ -36,7 +61,7 @@ async function setupModules(session) {
   currentModules.forEach(m => addRoute(m.route, (c) => m.view(c)));
 }
 
-// Autenticação (e-mail/senha)
+/* ==== UI de autenticação ==== */
 async function renderAuthArea(session) {
   if (session?.user) {
     const { data: profile } = await supabase
@@ -100,15 +125,15 @@ async function renderAuthArea(session) {
       e.preventDefault();
       msg.textContent = "Enviando...";
       const email = document.getElementById("forgot-email").value.trim();
-      // redireciona o usuário de volta ao app para escolher a nova senha
-      const redirectTo = window.location.origin + window.location.pathname; // ex.: https://gestao-do-aga.netlify.app/
+      // Redireciona de volta para a raiz da SPA
+      const redirectTo = window.location.origin + window.location.pathname;
       const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
       msg.textContent = error ? ("Erro: " + error.message) : "E-mail enviado.";
     };
   }
 }
 
-// Tela exibida quando o usuário acessa o link de recuperação de senha
+/* ==== Tela de redefinição de senha ==== */
 function renderPasswordReset() {
   navEl.innerHTML = "";
   authArea.innerHTML = `
@@ -130,19 +155,28 @@ function renderPasswordReset() {
       return;
     }
     msg.textContent = "Atualizando...";
-    const { error } = await supabase.auth.updateUser({ password: p1 });
-    if (error) {
-      msg.textContent = "Erro: " + error.message;
-    } else {
+    try {
+      const { error } = await supabase.auth.updateUser({ password: p1 });
+      if (error) {
+        msg.textContent = "Erro: " + error.message;
+        return;
+      }
       msg.textContent = "Senha alterada. Faça login novamente.";
-      // IMPORTANTE: remove access_token e type=recovery da URL antes de deslogar
-      clearAuthParamsFromUrl();
-      await supabase.auth.signOut();
+      clearAuthParamsFromUrl();     // remove tokens/type=recovery da URL
+      await supabase.auth.signOut(); // sai para voltar ao formulário de login
+      // Mostra o login
+      authArea.innerHTML = "";
+      const { data: { session: s2 } } = await supabase.auth.getSession();
+      await renderAuthArea(s2);
+      guardRoutes(null);
+    } catch (err) {
+      msg.textContent = "Erro inesperado ao atualizar a senha.";
+      console.error(err);
     }
   };
 }
 
-// Protege as rotas: se não estiver logado, mostra a tela de login
+/* ==== Proteção de rotas ==== */
 function guardRoutes(session) {
   if (!session?.user) {
     appContainer.innerHTML = `
@@ -151,38 +185,34 @@ function guardRoutes(session) {
       </div>
     `;
   } else {
-    // dispara o roteador normalmente
     startRouter(appContainer);
-    // navega para dashboard por padrão se não houver hash
     if (!window.location.hash) window.location.hash = "#/dashboard";
   }
 }
 
-// Sessão inicial
-const {
-  data: { session }
-} = await supabase.auth.getSession();
+/* ==== Fluxo inicial ==== */
+const { data: { session } } = await supabase.auth.getSession();
 
-// Se a URL é de recuperação, mostra o formulário de nova senha e não carrega o app
 if (isRecoveryLink()) {
+  // Cria sessão temporária apenas nesta aba (sem auto-login global)
+  const ok = await ensureRecoverySession();
   renderPasswordReset();
-  guardRoutes(null);
+  guardRoutes(null); // não carrega módulos enquanto redefine a senha
 } else {
   await setupModules(session);
   await renderAuthArea(session);
   guardRoutes(session);
 }
 
-// Reage a mudanças de sessão (login/logout)
+/* ==== Eventos de sessão (JWT: JSON Web Token) ==== */
 supabase.auth.onAuthStateChange(async (event, sessionNow) => {
-  // Em qualquer evento enquanto estivermos num fluxo de recuperação,
-  // priorize SEMPRE a tela de troca de senha.
-  if (isRecoveryLink() || event === "PASSWORD_RECOVERY") {
+  // Enquanto estivermos em / com type=recovery na URL,
+  // mantenha SEMPRE a tela de redefinição (ignora SIGNED_IN etc.)
+  if (isRecoveryLink()) {
     renderPasswordReset();
     guardRoutes(null);
     return;
   }
-
   await setupModules(sessionNow);
   await renderAuthArea(sessionNow);
   guardRoutes(sessionNow);
