@@ -7,5 +7,14 @@ if (!window.ENV?.SUPABASE_URL || !window.ENV?.SUPABASE_ANON_KEY) {
 
 export const supabase = createClient(
   window.ENV.SUPABASE_URL,
-  window.ENV.SUPABASE_ANON_KEY
+  window.ENV.SUPABASE_ANON_KEY,
+  {
+    auth: {
+      // Desliga o auto-login quando há tokens na URL (evita entrar logado ao abrir o link)
+      detectSessionInUrl: false,
+      // Mantém sessão no storage e auto refresh como antes
+      persistSession: true,
+      autoRefreshToken: true,
+    },
+  }
 );
