@@ -11,12 +11,11 @@ const authArea = document.getElementById("auth-area");
 
 let currentModules = [];
 
-/* ========= Utilidades de URL (Uniform Resource Locator) ========= */
+/* ========= Utilidades de URL ========= */
 function getAuthFlowType() {
   const url = new URL(window.location.href);
   const hash = url.hash;
   const q = url.searchParams.get("type");
-  // podemos receber no hash (#) ou na query (?)
   const t =
     (hash.includes("type=recovery") && "recovery") ||
     (hash.includes("type=invite") && "invite") ||
@@ -25,14 +24,26 @@ function getAuthFlowType() {
     null;
   return t;
 }
-function isAuthLink() {
-  return !!getAuthFlowType();
-}
+function isAuthLink() { return !!getAuthFlowType(); }
+
 function clearAuthParamsFromUrl() {
   const keepHash = window.location.hash.startsWith("#/") ? window.location.hash : "";
   const clean = window.location.origin + window.location.pathname + keepHash;
   window.history.replaceState({}, document.title, clean);
 }
+
+/* Hashs “ruins” (erros ou tokens fora de #/rota) */
+function isBadAuthHash() {
+  const h = window.location.hash || "";
+  const hasError = h.startsWith("#error=") || h.includes("error=") || h.includes("error_code=") || h.includes("error_description=");
+  const hasTokensOutsideRoute = (h.includes("access_token=") || h.includes("refresh_token=")) && !h.startsWith("#/");
+  return hasError || hasTokensOutsideRoute;
+}
+function sanitizeUrlIfBadHash() {
+  if (isBadAuthHash()) { clearAuthParamsFromUrl(); return true; }
+  return false;
+}
+
 function extractTokensFromUrl() {
   const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   const queryParams = new URLSearchParams(window.location.search);
@@ -56,9 +67,9 @@ function getRecoveryClient() {
   if (recoveryClient) return recoveryClient;
   recoveryClient = createSbClient(window.ENV.SUPABASE_URL, window.ENV.SUPABASE_ANON_KEY, {
     auth: {
-      persistSession: false,      // não escreve no localStorage
+      persistSession: false,
       autoRefreshToken: false,
-      detectSessionInUrl: false,  // vamos setar manualmente
+      detectSessionInUrl: false,
       storage: makeMemoryStorage()
     },
   });
@@ -66,12 +77,9 @@ function getRecoveryClient() {
 }
 async function ensureAuthSessionForThisTab() {
   const rc = getRecoveryClient();
-
-  // já tem sessão neste cliente?
   const { data: g } = await rc.auth.getSession();
   if (g?.session) return rc;
 
-  // cria sessão só nesta aba a partir dos tokens da URL
   const { access_token, refresh_token } = extractTokensFromUrl();
   if (!access_token || !refresh_token) return null;
 
@@ -132,7 +140,7 @@ async function renderAuthArea(session) {
       </form>
       <div id="auth-msg" class="small"></div>
     `;
-    navEl.innerHTML = ""; // esconde menu quando deslogado
+    navEl.innerHTML = "";
     const loginForm = document.getElementById("login-form");
     const forgotForm = document.getElementById("forgot-form");
     const msg = document.getElementById("auth-msg");
@@ -166,8 +174,8 @@ async function renderAuthArea(session) {
   }
 }
 
-/* ========= Tela de “definir nova senha” (serve para invite e recovery) ========= */
-function renderSetPassword(rc, flowType /* 'invite' | 'recovery' */) {
+/* ========= Tela “definir senha” (invite/recovery) ========= */
+function renderSetPassword(rc, flowType) {
   navEl.innerHTML = "";
   authArea.innerHTML = `
       <form id="reset-form" style="display:flex; gap:8px; align-items:center">
@@ -191,9 +199,8 @@ function renderSetPassword(rc, flowType /* 'invite' | 'recovery' */) {
       const { error } = await rc.auth.updateUser({ password: p1 });
       if (error) { msg.textContent = "Erro: " + error.message; return; }
 
-      // Sucesso: limpa a URL, encerra a sessão isolada e volta ao login
-      clearAuthParamsFromUrl();
-      await rc.auth.signOut();
+      clearAuthParamsFromUrl();   // limpa #access_token/type=...
+      await rc.auth.signOut();    // encerra a sessão isolada
       msg.textContent = "Senha alterada. Faça login novamente.";
 
       await renderAuthArea(null);
@@ -214,8 +221,12 @@ function guardRoutes(session) {
       </div>
     `;
   } else {
+    // Se houver hash “ruim” (#error=..., tokens fora de #/), limpe e vá para dashboard
+    const cleaned = sanitizeUrlIfBadHash();
+    if (cleaned || !window.location.hash || !window.location.hash.startsWith("#/")) {
+      window.location.hash = "#/dashboard";
+    }
     startRouter(appContainer);
-    if (!window.location.hash) window.location.hash = "#/dashboard";
   }
 }
 
@@ -224,20 +235,23 @@ const { data: { session } } = await supabase.auth.getSession();
 
 const flow = getAuthFlowType();
 if (flow) {
-  // Cria sessão **apenas nesta aba** para permitir updateUser()
   const rc = await ensureAuthSessionForThisTab();
   renderSetPassword(rc || getRecoveryClient(), flow);
-  guardRoutes(null); // não carrega módulos enquanto define a senha
+  guardRoutes(null);
 } else {
+  // Se chegarmos com um hash de erro (ex.: link expirado) e SEM estar num fluxo,
+  // limpe antes de carregar a SPA.
+  sanitizeUrlIfBadHash();
   await setupModules(session);
   await renderAuthArea(session);
   guardRoutes(session);
 }
 
-/* ========= Eventos de sessão (JWT: JSON Web Token) ========= */
+/* ========= Eventos de sessão ========= */
 supabase.auth.onAuthStateChange(async (event, sessionNow) => {
-  // Durante invite/recovery, ignoramos eventos como SIGNED_IN para não “sair” da tela
-  if (isAuthLink()) return;
+  if (isAuthLink()) return; // mantém a tela de set password
+  // Se algum evento chegar enquanto a URL tem hash de erro, limpe-o
+  sanitizeUrlIfBadHash();
   await setupModules(sessionNow);
   await renderAuthArea(sessionNow);
   guardRoutes(sessionNow);
