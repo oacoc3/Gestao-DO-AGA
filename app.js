@@ -9,6 +9,19 @@ const authArea = document.getElementById("auth-area");
 
 let currentModules = [];
 
+/* Utilitário: estamos num link de recuperação? */
+function isRecoveryLink() {
+  const url = new URL(window.location.href);
+  // Supabase envia "type=recovery" no hash (#) e pode aparecer também na query (?type=)
+  return url.hash.includes("type=recovery") || url.searchParams.get("type") === "recovery";
+}
+
+/* Utilitário: limpa o hash e a query da URL (remove access_token, type=recovery, etc.) */
+function clearAuthParamsFromUrl() {
+  const clean = window.location.origin + window.location.pathname + (window.location.hash.startsWith("#/") ? window.location.hash : "");
+  window.history.replaceState({}, document.title, clean);
+}
+
 async function setupModules(session) {
   let perfil = session?.user?.app_metadata?.perfil;
   if (session?.user) {
@@ -88,7 +101,7 @@ async function renderAuthArea(session) {
       msg.textContent = "Enviando...";
       const email = document.getElementById("forgot-email").value.trim();
       // redireciona o usuário de volta ao app para escolher a nova senha
-      const redirectTo = window.location.origin + window.location.pathname;
+      const redirectTo = window.location.origin + window.location.pathname; // ex.: https://gestao-do-aga.netlify.app/
       const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
       msg.textContent = error ? ("Erro: " + error.message) : "E-mail enviado.";
     };
@@ -122,6 +135,8 @@ function renderPasswordReset() {
       msg.textContent = "Erro: " + error.message;
     } else {
       msg.textContent = "Senha alterada. Faça login novamente.";
+      // IMPORTANTE: remove access_token e type=recovery da URL antes de deslogar
+      clearAuthParamsFromUrl();
       await supabase.auth.signOut();
     }
   };
@@ -147,11 +162,9 @@ function guardRoutes(session) {
 const {
   data: { session }
 } = await supabase.auth.getSession();
-// ao clicar no link enviado por e-mail, a URL contém type=recovery
-const url = new URL(window.location.href);
-const isRecovery =
-  url.hash.includes("type=recovery") || url.searchParams.get("type") === "recovery";
-if (isRecovery) {
+
+// Se a URL é de recuperação, mostra o formulário de nova senha e não carrega o app
+if (isRecoveryLink()) {
   renderPasswordReset();
   guardRoutes(null);
 } else {
@@ -162,11 +175,14 @@ if (isRecovery) {
 
 // Reage a mudanças de sessão (login/logout)
 supabase.auth.onAuthStateChange(async (event, sessionNow) => {
-  if (event === "PASSWORD_RECOVERY") {
+  // Em qualquer evento enquanto estivermos num fluxo de recuperação,
+  // priorize SEMPRE a tela de troca de senha.
+  if (isRecoveryLink() || event === "PASSWORD_RECOVERY") {
     renderPasswordReset();
     guardRoutes(null);
     return;
   }
+
   await setupModules(sessionNow);
   await renderAuthArea(sessionNow);
   guardRoutes(sessionNow);
