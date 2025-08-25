@@ -16,10 +16,21 @@ function setupModules(session) {
 }
 
 // Autenticação (e-mail/senha)
-function renderAuthArea(session) {
+async function renderAuthArea(session) {
   if (session?.user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("posto_graduacao, nome_guerra, email, perfil")
+      .eq("id", session.user.id)
+      .single();
+
+    const postoGrad = profile?.posto_graduacao || "";
+    const nomeGuerra = profile?.nome_guerra || "";
+    const email = profile?.email || session.user.email;
+    const perfil = profile?.perfil || session.user.app_metadata?.perfil || "";
+
     authArea.innerHTML = `
-      <span class="small">Logado: ${session.user.email}</span>
+      <span class="small">${postoGrad} ${nomeGuerra} - ${email} - ${perfil}</span>
       <button id="btn-logout" style="margin-left:8px">Sair</button>
     `;
     document.getElementById("btn-logout").onclick = async () => {
@@ -68,12 +79,12 @@ function guardRoutes(session) {
 // Sessão inicial
 const { data: { session } } = await supabase.auth.getSession();
 setupModules(session);
-renderAuthArea(session);
+supabase.auth.onAuthStateChange(async (_event, sessionNow) => {
 guardRoutes(session);
 
 // Reage a mudanças de sessão (login/logout)
-supabase.auth.onAuthStateChange((_event, sessionNow) => {
+supabase.auth.onAuthStateChange(async (_event, sessionNow) => {
   setupModules(sessionNow);
-  renderAuthArea(sessionNow);
+  await renderAuthArea(sessionNow);
   guardRoutes(sessionNow);
 });
