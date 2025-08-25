@@ -3,6 +3,7 @@
 // Siglas:
 // - JWT: JSON Web Token (token do usuário, ex.: app_metadata.perfil)
 // - RLS: Row Level Security (segurança em nível de linha no banco)
+// - SMTP: Simple Mail Transfer Protocol (envio de e-mails)
 
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
@@ -10,7 +11,9 @@ import { randomUUID } from 'node:crypto';
 const {
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY,
-  ADMIN_EMAILS // opcional: "email1@dom.com, email2@dom.com"
+  ADMIN_EMAILS,       // opcional: "email1@dom.com, email2@dom.com"
+  DEFAULT_PASSWORD,   // opcional: senha padrão se você quiser (ex.: "123456")
+  SITE_URL            // ex.: "https://gestao-do-aga.netlify.app"
 } = process.env;
 
 function json(status, body) {
@@ -21,7 +24,6 @@ function json(status, body) {
   };
 }
 
-// Cria o client somente se o ambiente estiver OK (evita 502 na carga do módulo)
 function getAdminClient() {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     throw {
@@ -35,17 +37,20 @@ function getAdminClient() {
   });
 }
 
-// Remove campos indefinidos (evita payload inválido para a API)
 function clean(obj) {
   return Object.fromEntries(
     Object.entries(obj).filter(([_, v]) => v !== undefined && v !== null)
   );
 }
 
-// Valida o token do chamador e exige Administrador.
-// Regras:
-// 1) app_metadata.perfil === 'Administrador' -> OK
-// 2) e-mail está em ADMIN_EMAILS            -> OK (opcional para bootstrap)
+function resolveRedirectTo(event) {
+  if (SITE_URL) return SITE_URL; // recomendado
+  const proto = event.headers['x-forwarded-proto'] || 'https';
+  const host = event.headers['x-forwarded-host'] || event.headers.host;
+  if (host) return `${proto}://${host}`;
+  return 'https://exemplo.com'; // ajuste se aparecer isso nos logs
+}
+
 async function requireAdmin(event, supaAdmin) {
   const auth = event.headers.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
@@ -71,14 +76,14 @@ async function requireAdmin(event, supaAdmin) {
 
 export async function handler(event) {
   try {
-    const supaAdmin = getAdminClient();   // valida ENV aqui
-    await requireAdmin(event, supaAdmin); // valida JWT/admin
+    const supaAdmin = getAdminClient();
+    await requireAdmin(event, supaAdmin);
 
     const url = new URL(event.rawUrl);
     const method = event.httpMethod;
     const action = url.searchParams.get('action');
 
-    // LISTAR usuários (profiles)
+    // LISTAR perfis
     if (method === 'GET') {
       const page = Number(url.searchParams.get('page') || '1');
       const size = Number(url.searchParams.get('size') || '50');
@@ -95,27 +100,26 @@ export async function handler(event) {
       return json(200, { data });
     }
 
-    // RESET de senha por e-mail
+    // REENVIAR e-mail de definição de senha manualmente
     if (method === 'POST' && action === 'reset') {
       const body = JSON.parse(event.body || '{}');
       const { email } = body;
       if (!email) return json(400, { error: 'email é obrigatório' });
 
-      const { error: e1 } = await supaAdmin.auth.admin.generateLink({
-        type: 'recovery',
-        email,
-      });
+      const redirectTo = resolveRedirectTo(event);
+      // usa o mailer do Supabase
+      const { error: e1 } = await supaAdmin.auth.resetPasswordForEmail(email, { redirectTo });
       if (e1) throw e1;
 
       return json(200, { ok: true, sent: true });
     }
 
-    // CRIAR usuário
+    // CRIAR usuário (com envio de e-mail garantido)
     if (method === 'POST') {
       const body = JSON.parse(event.body || '{}');
       const {
         email,
-        password,                 // opcional
+        password,                 // opcional — se vier, tem prioridade
         perfil,                   // 'Administrador', 'CH AGA', ...
         posto_graduacao,
         nome_guerra,
@@ -126,45 +130,79 @@ export async function handler(event) {
       const fullName = full_name || nome;
       if (!email || !perfil) return json(400, { error: 'email e perfil são obrigatórios' });
 
-      // 1) cria no Auth
       const userMeta = clean({ full_name: fullName, nome_guerra, posto_graduacao });
-      const params = {
+      const redirectTo = resolveRedirectTo(event);
+
+      // 1) Tenta o fluxo RECOMENDADO: inviteUserByEmail (cria e envia e-mail de convite)
+      const { data: invited, error: invErr } = await supaAdmin.auth.admin.inviteUserByEmail(
         email,
-        password: password || randomUUID(), // senha temporária
-        email_confirm: true,
-      };
-      if (Object.keys(userMeta).length) params.user_metadata = userMeta;
+        { data: userMeta, redirectTo }
+      );
 
-      const { data: created, error: e1 } = await supaAdmin.auth.admin.createUser(params);
-      if (e1) throw e1;
+      if (!invErr && invited?.user) {
+        const userId = invited.user.id;
 
-      // 2) garante app_metadata.perfil (compatibilidade)
-      const { error: e1b } = await supaAdmin.auth.admin.updateUserById(created.user.id, {
-        app_metadata: { perfil },
-      });
-      if (e1b) throw e1b;
-
-      // 3) upsert em public.profiles
-      const { error: e2 } = await supaAdmin
-        .from('profiles')
-        .upsert({
-          id: created.user.id,
-          email,
-          full_name: fullName,
-          nome_guerra,
-          posto_graduacao,
-          perfil,
-          must_change_password: true,
+        // garante app_metadata.perfil
+        const { error: e1b } = await supaAdmin.auth.admin.updateUserById(userId, {
+          app_metadata: { perfil },
         });
-      // 4) envia e-mail para cadastro da senha
-      const { error: e3 } = await supaAdmin.auth.admin.generateLink({
-        type: 'recovery',
-        email,
-      });
-      if (e3) throw e3;
-      if (e2) throw e2;
+        if (e1b) throw e1b;
 
-      return json(201, { ok: true, id: created.user.id });
+        // upsert no public.profiles
+        const { error: e2 } = await supaAdmin
+          .from('profiles')
+          .upsert({
+            id: userId,
+            email,
+            full_name: fullName,
+            nome_guerra,
+            posto_graduacao,
+            perfil,
+            must_change_password: true,
+          });
+        if (e2) throw e2;
+
+        return json(201, { ok: true, id: userId, invited: true, email_sent: true });
+      }
+
+      // 2) Fallback (se o invite falhar — ex.: usuário já existe):
+      //    cria o usuário (se ainda não existir) e envia e-mail de reset
+      const initialPassword = password ?? DEFAULT_PASSWORD ?? randomUUID();
+      const { data: created, error: e1 } = await supaAdmin.auth.admin.createUser({
+        email,
+        password: initialPassword,
+        email_confirm: true,
+        user_metadata: userMeta,
+      });
+      // se já existir, o erro costuma ser 422; seguimos mesmo assim
+      if (e1 && e1.status !== 422) throw e1;
+
+      const userId = created?.user?.id;
+      if (userId) {
+        const { error: e1b } = await supaAdmin.auth.admin.updateUserById(userId, {
+          app_metadata: { perfil },
+        });
+        if (e1b) throw e1b;
+
+        const { error: e2 } = await supaAdmin
+          .from('profiles')
+          .upsert({
+            id: userId,
+            email,
+            full_name: fullName,
+            nome_guerra,
+            posto_graduacao,
+            perfil,
+            must_change_password: true,
+          });
+        if (e2) throw e2;
+      }
+
+      // envia o e-mail de redefinição (usa o mailer do Supabase)
+      const { error: e3 } = await supaAdmin.auth.resetPasswordForEmail(email, { redirectTo });
+      if (e3) throw e3;
+
+      return json(201, { ok: true, id: userId ?? null, invited: false, email_sent: true });
     }
 
     // ATUALIZAR usuário
