@@ -86,11 +86,43 @@ async function renderAuthArea(session) {
     forgotForm.onsubmit = async (e) => {
       e.preventDefault();
       msg.textContent = "Enviando...";
-      const email = document.getElementById("forgot-email").value.trim();
-      const { error } = await supabase.auth.resetPasswordForEmail(email);
-      msg.textContent = error ? ("Erro: " + error.message) : "E-mail enviado.";
-    };
+    const email = document.getElementById("forgot-email").value.trim();
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    msg.textContent = error ? ("Erro: " + error.message) : "E-mail enviado.";
+  };
   }
+}
+
+// Tela exibida quando o usuário acessa o link de recuperação de senha
+function renderPasswordReset() {
+  navEl.innerHTML = "";
+  authArea.innerHTML = `
+      <form id="reset-form" style="display:flex; gap:8px; align-items:center">
+        <input id="new-pass" type="password" placeholder="nova senha" />
+        <input id="conf-pass" type="password" placeholder="confirmar senha" />
+        <button type="submit">Salvar</button>
+      </form>
+      <div id="auth-msg" class="small"></div>
+    `;
+  const form = document.getElementById("reset-form");
+  const msg = document.getElementById("auth-msg");
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const p1 = form["new-pass"].value;
+    const p2 = form["conf-pass"].value;
+    if (p1 !== p2) {
+      msg.textContent = "Senhas não conferem.";
+      return;
+    }
+    msg.textContent = "Atualizando...";
+    const { error } = await supabase.auth.updateUser({ password: p1 });
+    if (error) {
+      msg.textContent = "Erro: " + error.message;
+    } else {
+      msg.textContent = "Senha alterada. Faça login novamente.";
+      await supabase.auth.signOut();
+    }
+  };
 }
 
 // Protege as rotas: se não estiver logado, mostra a tela de login
@@ -113,12 +145,24 @@ function guardRoutes(session) {
 const {
   data: { session }
 } = await supabase.auth.getSession();
-await setupModules(session);
-await renderAuthArea(session);
-guardRoutes(session);
+const isRecovery = window.location.hash.includes("type=recovery");
+if (isRecovery) {
+  renderPasswordReset();
+  guardRoutes(null);
+} else {
+  await setupModules(session);
+  await renderAuthArea(session);
+  guardRoutes(session);
+}
 
 // Reage a mudanças de sessão (login/logout)
 supabase.auth.onAuthStateChange(async (_event, sessionNow) => {
+supabase.auth.onAuthStateChange(async (event, sessionNow) => {
+  if (event === "PASSWORD_RECOVERY") {
+    renderPasswordReset();
+    guardRoutes(null);
+    return;
+  }
   await setupModules(sessionNow);
   await renderAuthArea(sessionNow);
   guardRoutes(sessionNow);
