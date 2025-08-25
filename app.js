@@ -51,19 +51,44 @@ async function renderAuthArea(session) {
         <input id="email" type="email" placeholder="email" />
         <input id="password" type="password" placeholder="senha" />
         <button type="submit">Entrar</button>
+        <a href="#" id="show-forgot" class="small">Esqueci minha senha</a>
+      </form>
+      <form id="forgot-form" style="display:none; gap:8px; align-items:center">
+        <input id="forgot-email" type="email" placeholder="email" />
+        <button type="submit">Enviar</button>
+        <button type="button" id="cancel-forgot">Cancelar</button>
       </form>
       <div id="auth-msg" class="small"></div>
     `;
     navEl.innerHTML = ""; // esconde menu quando deslogado
-    const form = document.getElementById("login-form");
+    const loginForm = document.getElementById("login-form");
+    const forgotForm = document.getElementById("forgot-form");
     const msg = document.getElementById("auth-msg");
-    form.onsubmit = async (e) => {
+    loginForm.onsubmit = async (e) => {
       e.preventDefault();
       msg.textContent = "Entrando...";
-      const email = form.email.value.trim();
-      const password = form.password.value;
+      const email = loginForm.email.value.trim();
+      const password = loginForm.password.value;
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       msg.textContent = error ? ("Erro: " + error.message) : "";
+    };
+    document.getElementById("show-forgot").onclick = (e) => {
+      e.preventDefault();
+      loginForm.style.display = "none";
+      forgotForm.style.display = "flex";
+      msg.textContent = "";
+    };
+    document.getElementById("cancel-forgot").onclick = () => {
+      forgotForm.style.display = "none";
+      loginForm.style.display = "flex";
+      msg.textContent = "";
+    };
+    forgotForm.onsubmit = async (e) => {
+      e.preventDefault();
+      msg.textContent = "Enviando...";
+      const email = document.getElementById("forgot-email").value.trim();
+      const { error } = await supabase.auth.resetPasswordForEmail(email);
+      msg.textContent = error ? ("Erro: " + error.message) : "E-mail enviado.";
     };
   }
 }
