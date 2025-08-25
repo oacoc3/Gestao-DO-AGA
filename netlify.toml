@@ -1,8 +1,18 @@
-[build.environment]
-  NODE_VERSION = "20"
+# netlify.toml — configuração mínima e válida
+
+[build]
+  # Se sua SPA é estática (HTML/JS puro), deixe sem comando:
+  command = ""
+  # Pasta publicada (ajuste se você usar /dist ou outra):
+  publish = "."
 
 [build.environment]
   NODE_VERSION = "20"
+  # Adicione aqui OUTRAS variáveis de build se precisar
+  # (nunca crie outro bloco [build.environment])
 
 [functions]
+  # Garante que os imports ESM funcionem nas Functions
   node_bundler = "esbuild"
+  # (opcional) garante inclusão de arquivos da pasta de functions
+  included_files = ["netlify/functions/**"]
