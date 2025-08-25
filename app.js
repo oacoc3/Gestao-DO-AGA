@@ -9,8 +9,16 @@ const authArea = document.getElementById("auth-area");
 
 let currentModules = [];
 
-function setupModules(session) {
-  const perfil = session?.user?.app_metadata?.perfil;
+async function setupModules(session) {
+  let perfil = session?.user?.app_metadata?.perfil;
+  if (session?.user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("perfil")
+      .eq("id", session.user.id)
+      .single();
+    perfil = profile?.perfil || perfil;
+  }
   currentModules = getModules(perfil);
   currentModules.forEach(m => addRoute(m.route, (c) => m.view(c)));
 }
@@ -80,13 +88,13 @@ function guardRoutes(session) {
 const {
   data: { session }
 } = await supabase.auth.getSession();
-setupModules(session);
+await setupModules(session);
 await renderAuthArea(session);
 guardRoutes(session);
 
 // Reage a mudanças de sessão (login/logout)
 supabase.auth.onAuthStateChange(async (_event, sessionNow) => {
-  setupModules(sessionNow);
+  await setupModules(sessionNow);
   await renderAuthArea(sessionNow);
   guardRoutes(sessionNow);
 });
