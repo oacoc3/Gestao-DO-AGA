@@ -86,10 +86,12 @@ async function renderAuthArea(session) {
     forgotForm.onsubmit = async (e) => {
       e.preventDefault();
       msg.textContent = "Enviando...";
-    const email = document.getElementById("forgot-email").value.trim();
-    const { error } = await supabase.auth.resetPasswordForEmail(email);
-    msg.textContent = error ? ("Erro: " + error.message) : "E-mail enviado.";
-  };
+      const email = document.getElementById("forgot-email").value.trim();
+      // redireciona o usuário de volta ao app para escolher a nova senha
+      const redirectTo = window.location.origin + window.location.pathname;
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+      msg.textContent = error ? ("Erro: " + error.message) : "E-mail enviado.";
+    };
   }
 }
 
@@ -145,7 +147,10 @@ function guardRoutes(session) {
 const {
   data: { session }
 } = await supabase.auth.getSession();
-const isRecovery = window.location.hash.includes("type=recovery");
+// ao clicar no link enviado por e-mail, a URL contém type=recovery
+const url = new URL(window.location.href);
+const isRecovery =
+  url.hash.includes("type=recovery") || url.searchParams.get("type") === "recovery";
 if (isRecovery) {
   renderPasswordReset();
   guardRoutes(null);
