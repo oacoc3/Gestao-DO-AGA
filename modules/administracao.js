@@ -105,7 +105,7 @@ export default {
           <tr>
             <td>${u.posto_graduacao || ""}</td>
             <td>${u.nome_guerra || ""}</td>
-            <td>${u.full_name || ""}</td>
+            <td>${u.full_name || u.nome || ""}</td>
             <td>${u.perfil || ""}</td>
             <td>${u.email}</td>
             <td>
