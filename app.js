@@ -156,7 +156,6 @@ if (isRecovery) {
 }
 
 // Reage a mudanças de sessão (login/logout)
-supabase.auth.onAuthStateChange(async (_event, sessionNow) => {
 supabase.auth.onAuthStateChange(async (event, sessionNow) => {
   if (event === "PASSWORD_RECOVERY") {
     renderPasswordReset();
