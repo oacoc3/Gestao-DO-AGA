@@ -77,9 +77,11 @@ function guardRoutes(session) {
 }
 
 // Sessão inicial
-const { data: { session } } = await supabase.auth.getSession();
+const {
+  data: { session }
+} = await supabase.auth.getSession();
 setupModules(session);
-supabase.auth.onAuthStateChange(async (_event, sessionNow) => {
+await renderAuthArea(session);
 guardRoutes(session);
 
 // Reage a mudanças de sessão (login/logout)
@@ -88,5 +90,3 @@ supabase.auth.onAuthStateChange(async (_event, sessionNow) => {
   await renderAuthArea(sessionNow);
   guardRoutes(sessionNow);
 });
-}
-                                }
