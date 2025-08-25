@@ -89,3 +89,4 @@ supabase.auth.onAuthStateChange(async (_event, sessionNow) => {
   guardRoutes(sessionNow);
 });
 }
+                                }
