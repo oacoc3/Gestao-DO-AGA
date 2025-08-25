@@ -91,13 +91,16 @@ export async function handler(event) {
         perfil,                   // 'Administrador', 'CH AGA', ...
         posto_graduacao,
         nome_guerra,
-        full_name
+        full_name,
+        nome // alias antigo para full_name
       } = body;
+
+      const fullName = full_name || nome; // garante compatibilidade com campos antigos
 
       if (!email || !perfil) return json(400, { error: 'email e perfil são obrigatórios' });
 
       // Cria no Auth com perfil no app_metadata
-      const userMeta = clean({ full_name, nome_guerra, posto_graduacao });
+      const userMeta = clean({ full_name: fullName, nome_guerra, posto_graduacao });
       const appMeta = clean({ perfil });
       const params = {
         email,
@@ -116,7 +119,7 @@ export async function handler(event) {
         .upsert({
           id: created.user.id,
           email,
-          full_name,
+           full_name: fullName,
           nome_guerra,
           posto_graduacao,
           perfil,
@@ -130,12 +133,14 @@ export async function handler(event) {
     // ATUALIZAR usuário
     if (method === 'PUT' || method === 'PATCH') {
       const body = JSON.parse(event.body || '{}');
-      const { id, email, perfil, posto_graduacao, nome_guerra, full_name } = body;
+      const { id, email, perfil, posto_graduacao, nome_guerra, full_name, nome } = body;
       if (!id) return json(400, { error: 'id é obrigatório' });
+
+      const fullName = full_name || nome;
 
       const updates = {};
       if (email) updates.email = email;
-      const userMeta = clean({ full_name, nome_guerra, posto_graduacao });
+      const userMeta = clean({ full_name: fullName, nome_guerra, posto_graduacao });
       if (Object.keys(userMeta).length) updates.user_metadata = userMeta;
       const appMeta = clean({ perfil });
       if (Object.keys(appMeta).length) updates.app_metadata = appMeta;
@@ -145,7 +150,7 @@ export async function handler(event) {
 
       const { error: e2 } = await supaAdmin
         .from('profiles')
-        .update({ email, full_name, nome_guerra, posto_graduacao, perfil })
+           .update({ email, full_name: fullName, nome_guerra, posto_graduacao, perfil })
         .eq('id', id);
       if (e2) throw e2;
 
