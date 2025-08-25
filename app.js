@@ -1,230 +1,222 @@
-// netlify/functions/adminUsers.js
-// Roda na Netlify usando a Service Role do Supabase.
-// Siglas:
-// - JWT: JSON Web Token (token do usuário, ex.: app_metadata.perfil)
-// - RLS: Row Level Security (segurança em nível de linha no banco)
-// - SMTP: Simple Mail Transfer Protocol (envio de e-mails)
+// app.js – Bootstrap do app: autenticação + rotas + menu
+import { supabase } from "./supabaseClient.js";
+import { startRouter, addRoute } from "./router.js";
+import { getModules, buildNav } from "./modules/index.js";
+// IMPORT CORRETO PARA NAVEGADOR (ESM = ECMAScript Module)
+import { createClient as createSbClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-import { createClient } from '@supabase/supabase-js';
-import { randomUUID } from 'node:crypto';
+const appContainer = document.getElementById("app");
+const navEl = document.getElementById("nav");
+const authArea = document.getElementById("auth-area");
 
-const {
-  SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY,
-  ADMIN_EMAILS,   // opcional: "email1@dom.com, email2@dom.com"
-  DEFAULT_PASSWORD, // opcional: senha padrão ao criar usuário (ex.: "123456")
-  SITE_URL        // ex.: "https://gestao-do-aga.netlify.app"
-} = process.env;
+let currentModules = [];
 
-// Utilitário de resposta JSON
-function json(status, body) {
+/* ========= Utilidades de URL (Uniform Resource Locator) ========= */
+function isRecoveryLink() {
+  const url = new URL(window.location.href);
+  return url.hash.includes("type=recovery") || url.searchParams.get("type") === "recovery";
+}
+function clearAuthParamsFromUrl() {
+  const keepHash = window.location.hash.startsWith("#/") ? window.location.hash : "";
+  const clean = window.location.origin + window.location.pathname + keepHash;
+  window.history.replaceState({}, document.title, clean);
+}
+function extractTokensFromUrl() {
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const queryParams = new URLSearchParams(window.location.search);
   return {
-    statusCode: status,
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    access_token: hashParams.get("access_token") || queryParams.get("access_token"),
+    refresh_token: hashParams.get("refresh_token") || queryParams.get("refresh_token"),
   };
 }
 
-// Cria o client somente se o ambiente estiver OK (evita 502 na carga do módulo)
-function getAdminClient() {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    throw {
-      status: 500,
-      message:
-        'Faltam variáveis SUPABASE_URL e/ou SUPABASE_SERVICE_ROLE_KEY no ambiente da Netlify.',
+/* ========= Cliente isolado (sem persistir sessão, em memória) ========= */
+function makeMemoryStorage() {
+  const store = {};
+  return {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = v; },
+    removeItem: (k) => { delete store[k]; },
+  };
+}
+let recoveryClient = null;
+function getRecoveryClient() {
+  if (recoveryClient) return recoveryClient;
+  recoveryClient = createSbClient(window.ENV.SUPABASE_URL, window.ENV.SUPABASE_ANON_KEY, {
+    auth: {
+      persistSession: false,      // não toca no localStorage
+      autoRefreshToken: false,
+      detectSessionInUrl: false,  // vamos setar sessão manualmente
+      storage: makeMemoryStorage()
+    },
+  });
+  return recoveryClient;
+}
+async function ensureRecoverySession() {
+  const rc = getRecoveryClient();
+  const { data: g } = await rc.auth.getSession();
+  if (g?.session) return rc;
+
+  const { access_token, refresh_token } = extractTokensFromUrl();
+  if (!access_token || !refresh_token) return null;
+
+  const { error } = await rc.auth.setSession({ access_token, refresh_token });
+  if (error) return null;
+  return rc;
+}
+
+/* ========= Módulos ========= */
+async function setupModules(session) {
+  let perfil = session?.user?.app_metadata?.perfil;
+  if (session?.user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("perfil")
+      .eq("id", session.user.id)
+      .single();
+    perfil = profile?.perfil || perfil;
+  }
+  currentModules = getModules(perfil);
+  currentModules.forEach(m => addRoute(m.route, (c) => m.view(c)));
+}
+
+/* ========= UI de autenticação ========= */
+async function renderAuthArea(session) {
+  if (session?.user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("posto_graduacao, nome_guerra, email, perfil")
+      .eq("id", session.user.id)
+      .single();
+
+    const postoGrad = profile?.posto_graduacao || "";
+    const nomeGuerra = profile?.nome_guerra || "";
+    const email = profile?.email || session.user.email;
+    const perfil = profile?.perfil || session.user.app_metadata?.perfil || "";
+
+    authArea.innerHTML = `
+      <span class="small">${postoGrad} ${nomeGuerra} - ${email} - ${perfil}</span>
+      <button id="btn-logout" style="margin-left:8px">Sair</button>
+    `;
+    document.getElementById("btn-logout").onclick = async () => {
+      await supabase.auth.signOut();
+    };
+    buildNav(navEl, currentModules);
+  } else {
+    authArea.innerHTML = `
+      <form id="login-form" style="display:flex; gap:8px; align-items:center">
+        <input id="email" type="email" placeholder="email" />
+        <input id="password" type="password" placeholder="senha" />
+        <button type="submit">Entrar</button>
+        <a href="#" id="show-forgot" class="small">Esqueci minha senha</a>
+      </form>
+      <form id="forgot-form" style="display:none; gap:8px; align-items:center">
+        <input id="forgot-email" type="email" placeholder="email" />
+        <button type="submit">Enviar</button>
+        <button type="button" id="cancel-forgot">Cancelar</button>
+      </form>
+      <div id="auth-msg" class="small"></div>
+    `;
+    navEl.innerHTML = "";
+    const loginForm = document.getElementById("login-form");
+    const forgotForm = document.getElementById("forgot-form");
+    const msg = document.getElementById("auth-msg");
+    loginForm.onsubmit = async (e) => {
+      e.preventDefault();
+      msg.textContent = "Entrando...";
+      const email = loginForm.email.value.trim();
+      const password = loginForm.password.value;
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      msg.textContent = error ? ("Erro: " + error.message) : "";
+    };
+    document.getElementById("show-forgot").onclick = (e) => {
+      e.preventDefault();
+      loginForm.style.display = "none";
+      forgotForm.style.display = "flex";
+      msg.textContent = "";
+    };
+    document.getElementById("cancel-forgot").onclick = () => {
+      forgotForm.style.display = "none";
+      loginForm.style.display = "flex";
+      msg.textContent = "";
+    };
+    forgotForm.onsubmit = async (e) => {
+      e.preventDefault();
+      msg.textContent = "Enviando...";
+      const email = document.getElementById("forgot-email").value.trim();
+      const redirectTo = window.location.origin + window.location.pathname; // raiz da SPA
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+      msg.textContent = error ? ("Erro: " + error.message) : "E-mail enviado.";
     };
   }
-  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
 }
 
-// Remove campos indefinidos (evita payload inválido para a API)
-function clean(obj) {
-  return Object.fromEntries(
-    Object.entries(obj).filter(([_, v]) => v !== undefined && v !== null)
-  );
+/* ========= Tela de redefinição (usa o cliente isolado) ========= */
+function renderPasswordReset(rc) {
+  navEl.innerHTML = "";
+  authArea.innerHTML = `
+      <form id="reset-form" style="display:flex; gap:8px; align-items:center">
+        <input id="new-pass" type="password" placeholder="nova senha" />
+        <input id="conf-pass" type="password" placeholder="confirmar senha" />
+        <button type="submit">Salvar</button>
+      </form>
+      <div id="auth-msg" class="small"></div>
+    `;
+  const form = document.getElementById("reset-form");
+  const msg = document.getElementById("auth-msg");
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const p1 = form["new-pass"].value;
+    const p2 = form["conf-pass"].value;
+    if (p1 !== p2) { msg.textContent = "Senhas não conferem."; return; }
+    msg.textContent = "Atualizando...";
+    try {
+      const { error } = await rc.auth.updateUser({ password: p1 });
+      if (error) { msg.textContent = "Erro: " + error.message; return; }
+
+      clearAuthParamsFromUrl();
+      await rc.auth.signOut();   // encerra a sessão só deste cliente em memória
+      msg.textContent = "Senha alterada. Faça login novamente.";
+      await renderAuthArea(null);
+      guardRoutes(null);
+    } catch (err) {
+      console.error(err);
+      msg.textContent = "Erro inesperado ao atualizar a senha.";
+    }
+  };
 }
 
-// Determina a URL de redirecionamento usada nos e-mails do Supabase
-function resolveRedirectTo(event) {
-  // Preferência: variável de ambiente SITE_URL
-  if (SITE_URL) return SITE_URL;
-  // Fallback: tenta inferir da requisição (Netlify fornece headers)
-  const proto = event.headers['x-forwarded-proto'] || 'https';
-  const host = event.headers['x-forwarded-host'] || event.headers.host;
-  if (host) return `${proto}://${host}`;
-  // Último fallback: avisa para configurar
-  return 'https://exemplo.com';
-}
-
-// Valida o token do chamador e exige Administrador.
-async function requireAdmin(event, supaAdmin) {
-  const auth = event.headers.authorization || '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-  if (!token) throw { status: 401, message: 'Sem token' };
-
-  const { data, error } = await supaAdmin.auth.getUser(token);
-  if (error || !data?.user) throw { status: 401, message: 'Token inválido' };
-
-  const email = (data.user.email || '').toLowerCase();
-  const perfil = data.user.app_metadata?.perfil || 'Visitante';
-
-  if (perfil === 'Administrador') return { user: data.user };
-
-  if (ADMIN_EMAILS) {
-    const allow = new Set(
-      ADMIN_EMAILS.split(/[,\s]+/).map(s => s.trim().toLowerCase()).filter(Boolean)
-    );
-    if (allow.has(email)) return { user: data.user };
-  }
-
-  throw { status: 403, message: 'Acesso negado' };
-}
-
-export async function handler(event) {
-  try {
-    const supaAdmin = getAdminClient();   // valida ENV aqui
-    await requireAdmin(event, supaAdmin); // valida JWT/admin
-
-    const url = new URL(event.rawUrl);
-    const method = event.httpMethod;
-    const action = url.searchParams.get('action');
-
-    // LISTAR usuários (profiles)
-    if (method === 'GET') {
-      const page = Number(url.searchParams.get('page') || '1');
-      const size = Number(url.searchParams.get('size') || '50');
-      const from = (page - 1) * size;
-      const to = from + size - 1;
-
-      const { data, error } = await supaAdmin
-        .from('profiles')
-        .select('*')
-        .order('updated_at', { ascending: false })
-        .range(from, to);
-
-      if (error) throw error;
-      return json(200, { data });
-    }
-
-    // RESET de senha por e-mail (manual): POST ?action=reset
-    if (method === 'POST' && action === 'reset') {
-      const body = JSON.parse(event.body || '{}');
-      const { email } = body;
-      if (!email) return json(400, { error: 'email é obrigatório' });
-
-      const redirectTo = resolveRedirectTo(event);
-      const { error: e1 } = await supaAdmin.auth.resetPasswordForEmail(email, { redirectTo });
-      if (e1) throw e1;
-
-      return json(200, { ok: true, sent: true });
-    }
-
-    // CRIAR usuário
-    if (method === 'POST') {
-      const body = JSON.parse(event.body || '{}');
-      const {
-        email,
-        password,                 // opcional — se vier, tem prioridade
-        perfil,                   // 'Administrador', 'CH AGA', ...
-        posto_graduacao,
-        nome_guerra,
-        full_name,
-        nome                      // alias antigo
-      } = body;
-
-      const fullName = full_name || nome;
-      if (!email || !perfil) return json(400, { error: 'email e perfil são obrigatórios' });
-
-      // Senha inicial (se não vier no payload): DEFAULT_PASSWORD -> UUID
-      const initialPassword = password ?? DEFAULT_PASSWORD ?? randomUUID();
-
-      // 1) cria no Auth
-      const userMeta = clean({ full_name: fullName, nome_guerra, posto_graduacao });
-      const params = {
-        email,
-        password: initialPassword,
-        email_confirm: true,
-      };
-      if (Object.keys(userMeta).length) params.user_metadata = userMeta;
-
-      const { data: created, error: e1 } = await supaAdmin.auth.admin.createUser(params);
-      if (e1) throw e1;
-
-      // 2) garante app_metadata.perfil
-      const { error: e1b } = await supaAdmin.auth.admin.updateUserById(created.user.id, {
-        app_metadata: { perfil },
-      });
-      if (e1b) throw e1b;
-
-      // 3) upsert em public.profiles
-      const { error: e2 } = await supaAdmin
-        .from('profiles')
-        .upsert({
-          id: created.user.id,
-          email,
-          full_name: fullName,
-          nome_guerra,
-          posto_graduacao,
-          perfil,
-          must_change_password: true, // força troca na 1ª entrada
-        });
-      if (e2) throw e2;
-
-      // 4) Envia o e-mail de "definir nova senha" (recomendado)
-      const redirectTo = resolveRedirectTo(event);
-      const { error: e3 } = await supaAdmin.auth.resetPasswordForEmail(email, { redirectTo });
-      if (e3) throw e3;
-
-      return json(201, { ok: true, id: created.user.id });
-    }
-
-    // ATUALIZAR usuário
-    if (method === 'PUT' || method === 'PATCH') {
-      const body = JSON.parse(event.body || '{}');
-      const { id, email, perfil, posto_graduacao, nome_guerra, full_name, nome } = body;
-      if (!id) return json(400, { error: 'id é obrigatório' });
-
-      const fullName = full_name || nome;
-
-      const updates = {};
-      if (email) updates.email = email;
-      const userMeta = clean({ full_name: fullName, nome_guerra, posto_graduacao });
-      if (Object.keys(userMeta).length) updates.user_metadata = userMeta;
-      if (perfil) updates.app_metadata = { perfil };
-
-      const { error: e1 } = await supaAdmin.auth.admin.updateUserById(id, updates);
-      if (e1) throw e1;
-
-      const { error: e2 } = await supaAdmin
-        .from('profiles')
-        .update({ email, full_name: fullName, nome_guerra, posto_graduacao, perfil })
-        .eq('id', id);
-      if (e2) throw e2;
-
-      return json(200, { ok: true });
-    }
-
-    // EXCLUIR usuário
-    if (method === 'DELETE') {
-      const body = JSON.parse(event.body || '{}');
-      const { id } = body;
-      if (!id) return json(400, { error: 'id é obrigatório' });
-
-      const { error: e1 } = await supaAdmin.auth.admin.deleteUser(id);
-      if (e1) throw e1;
-
-      return json(200, { ok: true });
-    }
-
-    return json(404, { error: 'Rota não encontrada' });
-  } catch (err) {
-    const status = err?.status || err?.statusCode || (err?.name === 'ZodError' ? 400 : 500);
-    let message = err?.message || String(err);
-    if (err?.name === 'ZodError') {
-      message = err.errors?.map(e => e.message).join('; ') || message;
-    }
-    return json(status, { error: message });
+/* ========= Proteção de rotas ========= */
+function guardRoutes(session) {
+  if (!session?.user) {
+    appContainer.innerHTML = `
+      <div class="container">
+        <div class="card"><h3>Faça login para continuar.</h3></div>
+      </div>
+    `;
+  } else {
+    startRouter(appContainer);
+    if (!window.location.hash) window.location.hash = "#/dashboard";
   }
 }
+
+/* ========= Fluxo inicial ========= */
+const { data: { session } } = await supabase.auth.getSession();
+
+if (isRecoveryLink()) {
+  const rc = await ensureRecoverySession(); // cria sessão só nesta aba
+  renderPasswordReset(rc || getRecoveryClient());
+  guardRoutes(null);
+} else {
+  await setupModules(session);
+  await renderAuthArea(session);
+  guardRoutes(session);
+}
+
+/* ========= Eventos de sessão ========= */
+supabase.auth.onAuthStateChange(async (event, sessionNow) => {
+  if (isRecoveryLink()) return; // ignora eventos enquanto estiver no fluxo de recuperação
+  await setupModules(sessionNow);
+  await renderAuthArea(sessionNow);
+  guardRoutes(sessionNow);
+});
