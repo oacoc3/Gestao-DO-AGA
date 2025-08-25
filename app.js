@@ -103,9 +103,18 @@ async function renderAuthArea(session) {
       <span class="small">${postoGrad} ${nomeGuerra} - ${email} - ${perfil}</span>
       <button id="btn-logout" style="margin-left:8px">Sair</button>
     `;
-    document.getElementById("btn-logout").onclick = async () => {
-      await supabase.auth.signOut();
-    };
+    const logoutBtn = document.getElementById("btn-logout");
+    logoutBtn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      const { error } = await supabase.auth.signOut({ scope: "local" });
+      if (error) {
+        console.error("Erro ao sair:", error.message);
+        return;
+      }
+      // Atualiza a interface caso o evento de auth não seja disparado
+      await renderAuthArea(null);
+      guardRoutes(null);
+    });
     buildNav(navEl, currentModules);
   } else {
     authArea.innerHTML = `
