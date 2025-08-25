@@ -10,9 +10,8 @@ export const supabase = createClient(
   window.ENV.SUPABASE_ANON_KEY,
   {
     auth: {
-      // Desliga o auto-login quando há tokens na URL (evita entrar logado ao abrir o link)
+      // Evita que abrir um link com #access_token faça login automático
       detectSessionInUrl: false,
-      // Mantém sessão no storage e auto refresh como antes
       persistSession: true,
       autoRefreshToken: true,
     },
