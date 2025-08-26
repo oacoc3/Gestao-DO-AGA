@@ -20,9 +20,13 @@ export const supabase = createClient(
 
 // Garante que a sessão esteja ativa antes de cada chamada ao Supabase
 export async function ensureSession() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) {
-    const { error } = await supabase.auth.refreshSession();
-    if (error) throw error;
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  let session = data.session;
+  const now = Date.now();
+  const needsRefresh = !session || (session.expires_at && session.expires_at * 1000 - now < 60_000);
+  if (needsRefresh) {
+    const { error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError) throw refreshError;
   }
 }
