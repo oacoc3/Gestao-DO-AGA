@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lab de Prazos/Tasks</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h2>Lab — Processos & Tarefas</h2>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+        <input id="nup" placeholder="00000.000000/0000-00" />
+        <button id="btn-load">Carregar processo</button>
+        <select id="novo-status">
+          <option value="">— mudar status —</option>
+          <option>Aguardando ANAC</option>
+          <option>Análise Documental</option>
+          <option>Análise ICA</option>
+          <option>Análise Téc. Prel.</option>
+          <option>Análise Técnica</option>
+          <option>Confecção de Doc.</option>
+          <option>Revisão OACO</option>
+          <option>Aprovação</option>
+          <option>Sobrestado</option>
+          <option>Portaria</option>
+          <option>Remoção/Rebaixamento</option>
+          <option>Término de Obra</option>
+          <option>Atraso Término de Obra</option>
+          <option>Aguardando Ciência</option>
+          <option>Arquivado</option>
+        </select>
+        <button id="btn-aplicar">Aplicar status</button>
+      </div>
+      <div id="msg" class="small"></div>
+    </div>
+
+    <div class="card">
+      <h3>Tarefas do processo</h3>
+      <div id="tasks"></div>
+    </div>
+
+    <div class="card">
+      <h3>Ações rápidas</h3>
+      <div style="display:flex; gap:8px; flex-wrap:wrap">
+        <button data-act="PARECER" data-org="ATM">Solicitar ATM (10d)</button>
+        <button data-act="PARECER" data-org="DT">DT (10d)</button>
+        <button data-act="PARECER" data-org="CGNA">CGNA (30d)</button>
+        <button data-act="PARECER" data-org="DECEA">DECEA (30d)</button>
+        <button data-act="PARECER" data-org="COMAE">COMAE (30d)</button>
+        <button data-act="PARECER" data-org="COMPREP">COMPREP (30d)</button>
+        <button data-act="PARECER" data-org="GABAER">GABAER (30d)</button>
+        <button data-act="PARECER" data-org="COMGAP">COMGAP (90d)</button>
+
+        <button id="btn-sigad">Iniciar SIGAD (COMAE+COMGAP)</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./env.js"></script>
+  <script type="module" src="./lab.js"></script>
+</body>
+</html>
