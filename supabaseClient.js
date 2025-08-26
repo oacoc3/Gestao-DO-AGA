@@ -17,3 +17,12 @@ export const supabase = createClient(
     },
   }
 );
+
+// Garante que a sessão esteja ativa antes de cada chamada ao Supabase
+export async function ensureSession() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) {
+    const { error } = await supabase.auth.refreshSession();
+    if (error) throw error;
+  }
+}
