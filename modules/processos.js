@@ -364,7 +364,7 @@ function viewTabela(listView, sort) {
       ${headerCell("nup","NUP",sort)}
       ${headerCell("tipo","Tipo",sort)}
       ${headerCell("status","Status",sort)}
-      ${headerCell("parecer","Parecer(es) Interno(s)",sort)}
+      ${headerCell("parecer","Pareceres",sort)}
       ${headerCell("entrada","1ª Entrada<br>Regional",sort)}
       ${headerCell("prazo","Prazo<br>Regional",sort)}
       ${headerCell("atualizadoPor","Atualizado por",sort)}
