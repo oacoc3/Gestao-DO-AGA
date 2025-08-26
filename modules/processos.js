@@ -30,10 +30,9 @@ function displayUser(email) {
    ========================= */
 const TIPOS = ["PDIR", "Inscrição/Alteração", "Exploração", "OPEA"];
 const STATUS = [
-  "Análise Documental", "Análise Técnica Preliminar", "Análise Técnica",
-  "Parecer ATM", "Parecer DT", "Notificação", "Revisão OACO", "Aprovação",
-  "Sobrestado Documental", "Sobrestado Técnico", "Análise ICA",
-  "Publicação de Portaria", "Concluído", "Remoção/Rebaixamento", "Término de Obra"
+  "Análise Documental", "Análise ICA", "Análise Téc. Prel.",
+  "Análise Técnica", "Confecção de Doc.", "Revisão OACO",
+  "Aprovação", "Sobrestado", "Publicação de Portaria", "Arquivado"
 ];
 const PARECER_OPCOES = ["ATM", "DT", "CGNA"];
 /* =========================
@@ -119,7 +118,7 @@ async function getHistoricoBatch(ids) {
 /* =========================
    Cálculo Prazo Regional
    ========================= */
-const SOBRESTADOS = new Set(["Sobrestado Técnico", "Sobrestado Documental"]);
+const SOBRESTADOS = new Set(["Sobrestado"]);
 const DIA_MS = 24 * 60 * 60 * 1000;
 
 function calcularPrazosMapa(processos, historicos) {
