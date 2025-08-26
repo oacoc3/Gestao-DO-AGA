@@ -15,7 +15,7 @@ const STATUS = [
   "Sobrestado Documental", "Sobrestado Técnico", "Análise ICA",
   "Publicação de Portaria", "Concluído", "Remoção/Rebaixamento", "Término de Obra"
 ];
-
+const PARECER_OPCOES = ["ATM", "DT", "CGNA"];
 /* =========================
    Máscara / validação NUP
    ========================= */
@@ -167,7 +167,7 @@ function ensureLayoutCSS() {
     :root{
       --w-nup: clamp(20ch, 22ch, 26ch);
       --w-tipo: clamp(8ch, 10ch, 14ch);
-      --w-parecer: clamp(6ch, 8ch, 10ch);
+      --w-parecer: clamp(10ch, 14ch, 18ch);
       --w-entrada: clamp(10ch, 12ch, 16ch);
       --w-prazo: clamp(8ch, 10ch, 12ch);
     }
@@ -213,7 +213,7 @@ function ensureLayoutCSS() {
 
     .proc-grid-row.row-selected { outline:2px solid #999; outline-offset:-1px; }
 
-    .badge-pendente{ background:#f8d7da; color:#721c24; border-color:#f5c6cb; }
+    .badge-parecer{ background:#f8d7da; color:#721c24; border-color:#f5c6cb; }
 
     /* Histórico */
     :root{
@@ -591,7 +591,7 @@ export default {
 
       $salvar.disabled = true;
       $excluir.disabled = false;
-      $parecer.disabled = !!row.parecer_pendente;
+       $parecer.disabled = (row.pareceres_pendentes?.length || 0) >= PARECER_OPCOES.length;
       $msg.textContent = "Processo encontrado. Altere o Status se necessário ou veja o Histórico.";
     }
     function perguntaCriar(on) {
@@ -620,8 +620,10 @@ export default {
           nup: displayNUP(r.nup),   // <<< garante máscara na lista
           tipo: r.tipo,
           status: r.status,
-          parecerPend: !!r.parecer_pendente,
-          parecerDisplay: r.parecer_pendente ? '<span class="badge badge-pendente">Pendente</span>' : '-',
+          parecerCount: (r.pareceres_pendentes || []).length,
+          parecerDisplay: (r.pareceres_pendentes && r.pareceres_pendentes.length)
+            ? r.pareceres_pendentes.map(p => `<span class="badge badge-parecer">${p}</span>`).join(" ")
+            : '-',
            entrada: r.entrada_regional || "",
           atualizadoPor: r.modificado_por || "",
           atualizado: r.updated_at ? new Date(r.updated_at).getTime() : 0,
@@ -638,7 +640,7 @@ export default {
         switch (key) {
           case "nup": return v.nup || "";
           case "tipo": return v.tipo || "";
-         case "parecer": return v.parecerPend ? 1 : 0;
+         case "parecer": return v.parecerCount || 0;
            case "status": return v.status || "";
           case "entrada": return v.entradaTS ?? -Infinity;
           case "prazo": return (v.prazoDisplay === "Sobrestado") ? Number.POSITIVE_INFINITY : (v.prazoTS ?? Number.POSITIVE_INFINITY);
@@ -858,17 +860,25 @@ export default {
       } catch (e) { alert("Erro ao excluir: " + e.message); }
     });
 
-         $parecer.addEventListener("click", async () => {
+    $parecer.addEventListener("click", async () => {
       if (!currentRowId) { alert("Busque um processo antes de solicitar parecer."); return; }
-      $parecer.disabled = true;
+      const row = allList.find(r => String(r.id) === String(currentRowId));
+      const pend = row?.pareceres_pendentes || [];
+      const escolhas = PARECER_OPCOES
+        .filter(p => !pend.includes(p))
+        .filter(p => confirm(`Solicitar parecer ${p}?`));
+      if (!escolhas.length) return;
+            $parecer.disabled = true;
       try {
-        const { error } = await supabase.rpc("request_parecer", { p_processo_id: currentRowId });
+        const { error } = await supabase.rpc("request_parecer", { p_processo_id: currentRowId, p_orgaos: escolhas });
         if (error) throw error;
-        const row = allList.find(r => String(r.id) === String(currentRowId));
-        if (row) row.parecer_pendente = true;
+        if (row) {
+          row.pareceres_pendentes = Array.from(new Set([...(row.pareceres_pendentes || []), ...escolhas]));
+        }
         buildViewData();
         renderGridPreservandoScroll();
-        $msg.textContent = "Parecer solicitado.";
+         $parecer.disabled = (row?.pareceres_pendentes?.length || 0) >= PARECER_OPCOES.length;
+         $msg.textContent = "Parecer solicitado.";
       } catch (e) {
         $msg.textContent = "Erro ao solicitar parecer: " + e.message;
         $parecer.disabled = false;
