@@ -282,7 +282,15 @@ function ensureLayoutCSS() {
       padding: 4px 6px;
       font-size: 12px;
     }
-
+    .proc-grid-row > div:nth-child(4){
+      white-space: normal;
+      overflow: visible;
+      text-overflow: unset;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 2px;
+    }
     /* Título + botões (ordenadores) empilhados */
     .hdc { display:flex; flex-direction:column; align-items:center; gap:2px; }
     .hdc .title { line-height:1.05; }
@@ -706,7 +714,7 @@ export default {
           status: r.status,
           parecerCount: (r.pareceres_pendentes || []).length,
           parecerDisplay: (r.pareceres_pendentes && r.pareceres_pendentes.length)
-            ? r.pareceres_pendentes.map(p => `<span class="badge badge-parecer">${p}</span>`).join(" ")
+                ? r.pareceres_pendentes.map(p => `<span class="badge badge-parecer">${p}</span>`).join("")
             : '-',
            entrada: r.entrada_regional || "",
           atualizadoPor: displayUser(r.modificado_por),
