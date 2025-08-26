@@ -3,13 +3,14 @@
 // - CRUD: Create, Read, Update, Delete (Criar, Ler, Atualizar, Excluir)
 // - RLS: Row Level Security (Segurança em nível de linha)
 
-import { supabase } from "../supabaseClient.js";
+import { supabase, ensureSession } from "../supabaseClient.js";
 
 // Cache para exibir "Posto/Graduação" e "Nome de Guerra" em vez do e-mail
 const userCache = new Map();
 async function fetchProfilesByEmails(emails) {
   const list = Array.from(new Set(emails.filter(e => e && !userCache.has(e))));
   if (!list.length) return;
+  await ensureSession();
   const { data, error } = await supabase
     .from("profiles")
     .select("email, posto_graduacao, nome_guerra")
@@ -58,6 +59,7 @@ const displayNUP = (v) => maskNUP(onlyDigits17(v));
    Acesso Supabase (CRUD)
    ========================= */
 async function getProcessoByNup(nup) {
+  await ensureSession();
   const { data, error } = await supabase
     .from("processos")
     .select("*")
@@ -67,6 +69,7 @@ async function getProcessoByNup(nup) {
   return data;
 }
 async function createProcesso(payload) {
+  await ensureSession();
   const { data, error } = await supabase
     .from("processos")
     .insert(payload)
@@ -76,6 +79,7 @@ async function createProcesso(payload) {
   return data;
 }
 async function updateStatus(id, newStatus) {
+  await ensureSession();
   const { data, error } = await supabase
     .from("processos")
     .update({ status: newStatus })
@@ -86,11 +90,13 @@ async function updateStatus(id, newStatus) {
   return data;
 }
 async function deleteProcesso(id) {
+  await ensureSession();
   const { error } = await supabase.from("processos").delete().eq("id", id);
   if (error) throw error;
   return true;
 }
 async function getHistorico(processoId) {
+ await ensureSession();
   const { data, error } = await supabase
     .from("status_history")
     .select("*")
@@ -101,6 +107,7 @@ async function getHistorico(processoId) {
 }
 async function getHistoricoBatch(ids) {
   if (!ids.length) return [];
+  await ensureSession();
   const { data, error } = await supabase
     .from("status_history")
     .select("processo_id, old_status, new_status, changed_at, changed_by_email, changed_by")
@@ -504,6 +511,7 @@ async function fetchPageByCursor(cursor) {
   // Estratégia: duas consultas para emular keyset (evita OR complexo no PostgREST)
   // 1) updated_at < cursor.updated_at
   // 2) updated_at = cursor.updated_at AND id < cursor.id
+  await ensureSession();
   if (!cursor) {
     const { data, error } = await supabase
       .from("processos")
@@ -948,6 +956,7 @@ export default {
       if (!escolhas.length) return;
       $parecer.disabled = true;
       try {
+         await ensureSession();
         const { error } = await supabase.rpc("request_parecer", { p_processo_id: currentRowId, p_orgaos: escolhas });
         if (error) throw error;
         if (row) {
