@@ -58,7 +58,7 @@ document.querySelectorAll("[data-act='PARECER']").forEach(btn => {
   btn.onclick = async () => {
     if (!proc) { msg.textContent = "Selecione um processo."; return; }
     const org = btn.dataset.org;
-    const { error } = await supabase.rpc("request_parecer", { p_processo_id: proc.id, p_orgao: org });
+    const { error } = await supabase.rpc("request_parecer", { p_processo_id: proc.id, p_orgaos: [org] });
     msg.textContent = error ? ("Erro: "+error.message) : (`Parecer ${org} criado.`);
     await refreshTasks();
   };
