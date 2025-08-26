@@ -228,11 +228,11 @@ function ensureLayoutCSS() {
     .proc-form-row label { font-size:0.95rem; margin-bottom:2px; }
     .proc-form-row input, .proc-form-row select, .proc-form-row button { height:34px; }
 
-    /* Split 35%/65% */
+    /* Split: processos 65%, histórico 35% */
     .proc-split { display:flex; gap:10px; overflow:hidden; }
     .proc-pane { min-width:0; display:flex; flex-direction:column; overflow:hidden; }
+    .grid-pane { flex:0 0 65%; }
     .hist-pane { flex:0 0 35%; }
-    .grid-pane { flex:1 1 65%; }
     .pane-title { margin:0 0 8px 0; }
     .pane-body { flex:1 1 auto; min-height:0; overflow:hidden; display:flex; } /* rolagem interna */
 
@@ -240,7 +240,7 @@ function ensureLayoutCSS() {
     :root{
       --w-nup: clamp(20ch, 22ch, 26ch);
       --w-tipo: clamp(8ch, 10ch, 14ch);
-      --w-parecer: clamp(12ch, 16ch, 22ch);
+      --w-parecer: clamp(16ch, 20ch, 26ch);
       --w-entrada: clamp(10ch, 12ch, 16ch);
       --w-prazo: clamp(8ch, 10ch, 12ch);
     }
@@ -286,7 +286,7 @@ function ensureLayoutCSS() {
 
     .proc-grid-row.row-selected { outline:2px solid #999; outline-offset:-1px; }
 
-    .badge-parecer{ background:#f8d7da; color:#721c24; border-color:#f5c6cb; }
+    .badge-parecer{ background:#f8d7da; color:#721c24; border-color:#f5c6cb; font-size:10px; padding:1px 4px; }
 
     /* Histórico */
     :root{
@@ -358,7 +358,7 @@ function viewTabela(listView, sort) {
       ${headerCell("nup","NUP",sort)}
       ${headerCell("tipo","Tipo",sort)}
       ${headerCell("status","Status",sort)}
-      ${headerCell("parecer","Parecer",sort)}
+      ${headerCell("parecer","Parecer(es) Interno(s)",sort)}
       ${headerCell("entrada","1ª Entrada<br>Regional",sort)}
       ${headerCell("prazo","Prazo<br>Regional",sort)}
       ${headerCell("atualizadoPor","Atualizado por",sort)}
@@ -953,6 +953,10 @@ export default {
         if (row) {
           row.pareceres_pendentes = Array.from(new Set([...(row.pareceres_pendentes || []), ...escolhas]));
         }
+          const hist = await getHistorico(currentRowId);
+        await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
+        const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
+        histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
         renderGridPreservandoScroll();
         $parecer.disabled = (row?.pareceres_pendentes?.length || 0) >= PARECER_OPCOES.length;
