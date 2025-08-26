@@ -31,10 +31,10 @@ function displayUser(email) {
 const TIPOS = ["PDIR", "Inscrição/Alteração", "Exploração", "OPEA"];
 const STATUS = [
   "Análise Documental", "Análise ICA", "Análise Téc. Prel.",
-  "Análise Técnica", "Confecção de Doc.", "Revisão OACO",
+  "Análise Técnica", "Análise GABAER", "Confecção de Doc.", "Revisão OACO",
   "Aprovação", "Sobrestado", "Publicação de Portaria", "Arquivado"
 ];
-const PARECER_OPCOES = ["ATM", "DT", "CGNA"];
+const PARECER_OPCOES = ["ATM", "DT", "CGNA", "COMAE", "COMGAP", "COMPREP", "OPR AD"];
 /* =========================
    Máscara / validação NUP
    ========================= */
