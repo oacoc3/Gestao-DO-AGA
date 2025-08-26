@@ -65,6 +65,19 @@ function formatDateShort(value) {
   }
 }
 
+// Formata horas no padrão HH:MM
+function formatTimeShort(value) {
+  if (!value) return "";
+  try {
+    const d = new Date(value);
+    const h = String(d.getHours()).padStart(2, "0");
+    const m = String(d.getMinutes()).padStart(2, "0");
+    return `${h}:${m}`;
+  } catch {
+    return "";
+  }
+}
+
 /* =========================
    Acesso Supabase (CRUD)
    ========================= */
@@ -210,7 +223,7 @@ function selectParecerOptions(options) {
       minWidth: "200px",
     });
     box.innerHTML = `
-      <label>Selecione os pareceres:</label><br/>
+      <label>Selecione o Parecer:</label><br/>
       <select id="parecer-select" multiple size="${Math.min(options.length, 5)}" style="width:100%; margin-top:4px;">
         ${options.map(o => `<option value="${o}">${o}</option>`).join("")}
       </select>
@@ -260,9 +273,8 @@ function selectParecerRecebido(options) {
       minWidth: "200px",
     });
     box.innerHTML = `
-      <label>Selecione o parecer:</label><br/>
-      <select id="parecer-select" style="width:100%; margin-top:4px;">
-        <option value="" disabled selected hidden>-- selecione --</option>
+      <label>Selecione o Parecer:</label><br/>
+      <select id="parecer-select" size="${Math.min(options.length, 5)}" style="width:100%; margin-top:4px;">
         ${options.map(o => `<option value="${o}">${o}</option>`).join("")}
       </select>
       <div style="margin-top:8px; text-align:right;">
@@ -335,9 +347,7 @@ function ensureLayoutCSS() {
         minmax(0, 1.4fr)
         var(--w-parecer)
         var(--w-entrada)
-        var(--w-prazo)
-        minmax(0, 1fr)
-        minmax(0, 1fr);
+        var(--w-prazo);
       gap: 0;
       align-items: center;
     }
@@ -377,7 +387,7 @@ function ensureLayoutCSS() {
 
     /* Histórico */
     :root{
-      --w-hist-data: clamp(12ch, 16ch, 18ch);
+      --w-hist-data: clamp(14ch, 18ch, 22ch);
       --w-hist-autor: clamp(16ch, 20ch, 24ch);
     }
     .hist-scroll { height:100%; overflow-y:auto; overflow-x:hidden; }
@@ -448,8 +458,6 @@ function viewTabela(listView, sort) {
       ${headerCell("parecer","Pareceres",sort)}
       ${headerCell("entrada","1ª Entrada<br>Regional",sort)}
       ${headerCell("prazo","Prazo<br>Regional",sort)}
-      ${headerCell("atualizadoPor","Atualizado por",sort)}
-      ${headerCell("atualizado","Atualizado em",sort)}
     </div>
   `;
   const body = listView.map(v => `
@@ -460,8 +468,6 @@ function viewTabela(listView, sort) {
       <div>${v.parecerDisplay}</div>
       <div>${v.entrada || ""}</div>
       <div>${v.prazoDisplay}</div>
-      <div class="small">${v.atualizadoPor || ""}</div>
-      <div class="small">${v.atualizadoStr}</div>
     </div>
   `).join("");
 
@@ -474,12 +480,12 @@ function viewTabela(listView, sort) {
 function viewHistorico(title, hist) {
   const header = `
     <div class="hist-header">
-     <div>Data</div><div>Mudança</div><div>Por</div>
+     <div>Data/Hora</div><div>Mudança</div><div>Por</div>
     </div>
   `;
   const rows = (hist || []).map(h => {
     const autor = displayUser(h.changed_by_email) || h.changed_by || "(desconhecido)";
-    const quando = formatDateShort(h.changed_at);
+    const quando = `${formatDateShort(h.changed_at)} ${formatTimeShort(h.changed_at)}`;
     let mudanca = h.new_status || "";
     if (!mudanca) {
       if (h.parecer) {
@@ -704,7 +710,7 @@ export default {
     let hasNext = true;
     let loadingPage = false;
 
-    const sort = { key:"atualizado", dir:"desc" };
+    const sort = { key:"entrada", dir:"desc" };
 
     // Alturas/rolagem interna
     const resizeAll = () => applyHeights(root);
@@ -804,9 +810,6 @@ export default {
             return parts.length ? parts.join("") : '-';
           })(),
           entrada: formatDateShort(r.entrada_regional),
-          atualizadoPor: displayUser(r.modificado_por),
-          atualizado: r.updated_at ? new Date(r.updated_at).getTime() : 0,
-          atualizadoStr: formatDateShort(r.updated_at),
           prazoDisplay: prazoDisplay,
           prazoTS: prazoStrRaw && prazoStrRaw !== "Sobrestado" ? new Date(prazoStrRaw).getTime() : null,
           entradaTS: r.entrada_regional ? new Date(r.entrada_regional).getTime() : null
@@ -823,8 +826,6 @@ export default {
            case "status": return v.status || "";
           case "entrada": return v.entradaTS ?? -Infinity;
           case "prazo": return (v.prazoDisplay === "Sobrestado") ? Number.POSITIVE_INFINITY : (v.prazoTS ?? Number.POSITIVE_INFINITY);
-          case "atualizadoPor": return v.atualizadoPor || "";
-          case "atualizado": return v.atualizado ?? 0;
           default: return "";
         }
       };
@@ -891,7 +892,6 @@ export default {
     async function upsertPinnedRow(row) {
       if (!allList.some(r => String(r.id) === String(row.id))) {
         allList.push(row);
-        await fetchProfilesByEmails([row.modificado_por].filter(Boolean));
         const hist = await getHistorico(row.id);
         const prazo = calcularPrazoUnit(row, hist);
         row.pareceres_recebidos = extractPareceresRecebidos(hist);
@@ -920,7 +920,6 @@ export default {
     async function assimilateRows(rows) {
       if (!rows || !rows.length) return;
       allList = allList.concat(rows);
-      await fetchProfilesByEmails(rows.map(r => r.modificado_por).filter(Boolean));
       const ids = rows.map(r => r.id);
       const historicos = await getHistoricoBatch(ids);
       const prazosSub = calcularPrazosMapa(rows, historicos);
