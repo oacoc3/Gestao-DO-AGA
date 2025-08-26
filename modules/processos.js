@@ -54,6 +54,17 @@ const isFullNUP = (v) => onlyDigits17(v).length === 17;
 // Sempre exibir com máscara
 const displayNUP = (v) => maskNUP(onlyDigits17(v));
 
+// Formata datas no padrão DD/MM/AA
+function formatDateShort(value) {
+  if (!value) return "";
+  try {
+    const [y, m, d] = String(value).split("T")[0].split("-");
+    return `${d}/${m}/${y.slice(-2)}`;
+  } catch {
+    return "";
+  }
+}
+
 /* =========================
    Acesso Supabase (CRUD)
    ========================= */
@@ -109,7 +120,7 @@ async function getHistoricoBatch(ids) {
   await ensureSession();
   const { data, error } = await supabase
     .from("status_history")
-    .select("processo_id, old_status, new_status, changed_at, changed_by_email, changed_by")
+    .select("processo_id, old_status, new_status, changed_at, changed_by_email, changed_by, parecer")
     .in("processo_id", ids);
   if (error) throw error;
   return data;
@@ -160,6 +171,16 @@ function calcularPrazoUnit(p, hist = []) {
   return base ? new Date(base.getTime() + 60 * DIA_MS).toISOString().slice(0, 10) : "";
 }
 
+function extractPareceresRecebidos(hist = []) {
+  const set = new Set();
+  for (const h of hist) {
+    const p = h.parecer;
+    if (!p) continue;
+    if (Array.isArray(p)) p.forEach(v => set.add(v));
+    else set.add(p);
+  }
+  return Array.from(set);
+}
 
 /* =========================
    Seleção múltipla de parecer
@@ -210,6 +231,57 @@ function selectParecerOptions(options) {
     box.querySelector("#parecer-cancel").addEventListener("click", () => {
       document.body.removeChild(overlay);
       resolve([]);
+    });
+  });
+}
+
+function selectParecerRecebido(options) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    Object.assign(overlay.style, {
+      position: "fixed",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: "rgba(0,0,0,0.3)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 9999,
+    });
+
+    const box = document.createElement("div");
+    Object.assign(box.style, {
+      background: "#fff",
+      padding: "12px",
+      border: "1px solid #ccc",
+      borderRadius: "4px",
+      minWidth: "200px",
+    });
+    box.innerHTML = `
+      <label>Selecione o parecer:</label><br/>
+      <select id="parecer-select" style="width:100%; margin-top:4px;">
+        <option value="" disabled selected hidden>-- selecione --</option>
+        ${options.map(o => `<option value="${o}">${o}</option>`).join("")}
+      </select>
+      <div style="margin-top:8px; text-align:right;">
+        <button id="parecer-ok">OK</button>
+        <button id="parecer-cancel" type="button" style="margin-left:6px;">Cancelar</button>
+      </div>
+    `;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const select = box.querySelector("#parecer-select");
+    box.querySelector("#parecer-ok").addEventListener("click", () => {
+      const value = select.value;
+      document.body.removeChild(overlay);
+      resolve(value);
+    });
+    box.querySelector("#parecer-cancel").addEventListener("click", () => {
+      document.body.removeChild(overlay);
+      resolve("");
     });
   });
 }
@@ -299,8 +371,9 @@ function ensureLayoutCSS() {
     .sort-btn.active { background:#e9e9e9; font-weight:bold; }
 
     .proc-grid-row.row-selected { outline:2px solid #999; outline-offset:-1px; }
-
-    .badge-parecer{ background:#f8d7da; color:#721c24; border-color:#f5c6cb; font-size:10px; padding:1px 4px; }
+    .badge-parecer{ font-size:10px; padding:1px 4px; border:1px solid transparent; }
+    .badge-parecer.pendente{ background:#f8d7da; color:#721c24; border-color:#f5c6cb; }
+    .badge-parecer.recebido{ background:#d4edda; color:#155724; border-color:#c3e6cb; }
 
     /* Histórico */
     :root{
@@ -401,16 +474,21 @@ function viewTabela(listView, sort) {
 function viewHistorico(title, hist) {
   const header = `
     <div class="hist-header">
-      <div>Data/Hora</div><div>Mudança</div><div>Por</div>
+     <div>Data</div><div>Mudança</div><div>Por</div>
     </div>
   `;
   const rows = (hist || []).map(h => {
     const autor = displayUser(h.changed_by_email) || h.changed_by || "(desconhecido)";
-    const quando = new Date(h.changed_at).toLocaleString();
+    const quando = formatDateShort(h.changed_at);
     let mudanca = h.new_status || "";
     if (!mudanca) {
-      const p = h.parecer || h.parecer_solicitado || h.orgao;
-      if (p) mudanca = `Parecer ${Array.isArray(p) ? p.join(', ') : p} solicitado`;
+      if (h.parecer) {
+        const p = Array.isArray(h.parecer) ? h.parecer.join(', ') : h.parecer;
+        mudanca = `Parecer ${p} recebido`;
+      } else {
+        const p = h.parecer_solicitado || h.orgao;
+        if (p) mudanca = `Parecer ${Array.isArray(p) ? p.join(', ') : p} solicitado`;
+      }
     }
     if (!mudanca) mudanca = h.old_status || "(sem registro)";
     return `<div class="hist-row"><div>${quando}</div><div>${mudanca}</div><div>${autor}</div></div>`;
@@ -463,6 +541,7 @@ function viewFormulario() {
       </div>
       <div class="proc-form-row">
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-parecer" disabled>Solicitar Parecer</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Receber Parecer</button></div>
       </div>
       <div id="msg-novo" class="small" style="margin-top:6px"></div>
     </div>
@@ -602,7 +681,8 @@ export default {
     const $salvar = el("#btn-salvar");
     const $excluir = el("#btn-excluir");
     const $parecer = el("#btn-parecer");
-     const $msg = el("#msg-novo");
+    const $receber = el("#btn-receber");
+    const $msg = el("#msg-novo");
     const gridWrap = el("#grid");
     const histPane = el("#hist-pane");
     const root = container;
@@ -640,7 +720,7 @@ export default {
       if (clearNup) $nup.value = "";
       $tipo.value = ""; $entrada.value = ""; $status.value = "";
       $tipo.disabled = true; $entrada.disabled = true; $status.disabled = true;
-      $salvar.disabled = true; $excluir.disabled = true; $parecer.disabled = true;
+      $salvar.disabled = true; $excluir.disabled = true; $parecer.disabled = true; $receber.disabled = true;
       currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
       pinnedId = null; // remove o pino ao limpar
     }
@@ -660,7 +740,7 @@ export default {
       $status.disabled = false;
 
       $salvar.disabled = false;
-      $excluir.disabled = true; $parecer.disabled = true;
+     $excluir.disabled = true; $parecer.disabled = true; $receber.disabled = true;
 
       $msg.textContent = "Preencha os campos e clique em Salvar.";
       histPane.innerHTML = viewHistorico(`Histórico — ${nupMasked}`, []);
@@ -683,7 +763,8 @@ export default {
 
       $salvar.disabled = true;
       $excluir.disabled = false;
-       $parecer.disabled = (row.pareceres_pendentes?.length || 0) >= PARECER_OPCOES.length;
+      $parecer.disabled = (row.pareceres_pendentes?.length || 0) >= PARECER_OPCOES.length;
+      $receber.disabled = !(row.pareceres_pendentes && row.pareceres_pendentes.length);
       $msg.textContent = "Processo encontrado. Altere o Status se necessário ou veja o Histórico.";
     }
     function perguntaCriar(on) {
@@ -706,22 +787,28 @@ export default {
     // viewData (mapeia allList -> grid) — NUP sempre mascarado
     function buildViewData() {
       viewData = allList.map(r => {
-        const prazoStr = SOBRESTADOS.has(r.status) ? "Sobrestado" : (prazosMap.get(r.id) || "");
+        const prazoStrRaw = SOBRESTADOS.has(r.status) ? "Sobrestado" : (prazosMap.get(r.id) || "");
+        const prazoDisplay = prazoStrRaw && prazoStrRaw !== "Sobrestado" ? formatDateShort(prazoStrRaw) : prazoStrRaw;
         return {
           id: r.id,
           nup: displayNUP(r.nup),   // <<< garante máscara na lista
           tipo: r.tipo,
           status: r.status,
           parecerCount: (r.pareceres_pendentes || []).length,
-          parecerDisplay: (r.pareceres_pendentes && r.pareceres_pendentes.length)
-                ? r.pareceres_pendentes.map(p => `<span class="badge badge-parecer">${p}</span>`).join("")
-            : '-',
-           entrada: r.entrada_regional || "",
+          parecerDisplay: (function(){
+            const parts = PARECER_OPCOES.map(p => {
+              if (r.pareceres_pendentes?.includes(p)) return `<span class="badge badge-parecer pendente">${p}</span>`;
+              if (r.pareceres_recebidos?.includes(p)) return `<span class="badge badge-parecer recebido">${p}</span>`;
+              return "";
+            }).filter(Boolean);
+            return parts.length ? parts.join("") : '-';
+          })(),
+          entrada: formatDateShort(r.entrada_regional),
           atualizadoPor: displayUser(r.modificado_por),
           atualizado: r.updated_at ? new Date(r.updated_at).getTime() : 0,
-          atualizadoStr: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
-          prazoDisplay: prazoStr,
-          prazoTS: prazoStr && prazoStr !== "Sobrestado" ? new Date(prazoStr).getTime() : null,
+          atualizadoStr: formatDateShort(r.updated_at),
+          prazoDisplay: prazoDisplay,
+          prazoTS: prazoStrRaw && prazoStrRaw !== "Sobrestado" ? new Date(prazoStrRaw).getTime() : null,
           entradaTS: r.entrada_regional ? new Date(r.entrada_regional).getTime() : null
         };
       });
@@ -805,8 +892,9 @@ export default {
       if (!allList.some(r => String(r.id) === String(row.id))) {
         allList.push(row);
         await fetchProfilesByEmails([row.modificado_por].filter(Boolean));
-         const hist = await getHistorico(row.id);
+        const hist = await getHistorico(row.id);
         const prazo = calcularPrazoUnit(row, hist);
+        row.pareceres_recebidos = extractPareceresRecebidos(hist);
         prazosMap.set(row.id, prazo);
         buildViewData();
       }
@@ -833,10 +921,21 @@ export default {
       if (!rows || !rows.length) return;
       allList = allList.concat(rows);
       await fetchProfilesByEmails(rows.map(r => r.modificado_por).filter(Boolean));
-       const ids = rows.map(r => r.id);
+      const ids = rows.map(r => r.id);
       const historicos = await getHistoricoBatch(ids);
       const prazosSub = calcularPrazosMapa(rows, historicos);
       prazosSub.forEach((v, k) => prazosMap.set(k, v));
+      const recebidosMap = new Map();
+      historicos.forEach(h => {
+        if (!h.parecer) return;
+        const arr = Array.isArray(h.parecer) ? h.parecer : [h.parecer];
+        const set = recebidosMap.get(h.processo_id) || new Set();
+        arr.forEach(v => set.add(v));
+        recebidosMap.set(h.processo_id, set);
+      });
+      rows.forEach(r => {
+        r.pareceres_recebidos = Array.from(recebidosMap.get(r.id) || []);
+      });
       buildViewData();
       renderGridPreservandoScroll();
     }
@@ -963,23 +1062,56 @@ export default {
       if (!escolhas.length) return;
       $parecer.disabled = true;
       try {
-         await ensureSession();
+        await ensureSession();
         const { error } = await supabase.rpc("request_parecer", { p_processo_id: currentRowId, p_orgaos: escolhas });
         if (error) throw error;
         if (row) {
           row.pareceres_pendentes = Array.from(new Set([...(row.pareceres_pendentes || []), ...escolhas]));
         }
-          const hist = await getHistorico(currentRowId);
+        const hist = await getHistorico(currentRowId);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
+        if (row) row.pareceres_recebidos = extractPareceresRecebidos(hist);
         const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
         histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
         renderGridPreservandoScroll();
         $parecer.disabled = (row?.pareceres_pendentes?.length || 0) >= PARECER_OPCOES.length;
+       $receber.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
         $msg.textContent = "Parecer solicitado.";
       } catch (e) {
         $msg.textContent = "Erro ao solicitar parecer: " + e.message;
         $parecer.disabled = false;
+      }
+    });
+
+    $receber.addEventListener("click", async () => {
+      if (!currentRowId) { alert("Busque um processo antes de receber parecer."); return; }
+      const row = allList.find(r => String(r.id) === String(currentRowId));
+      const pend = row?.pareceres_pendentes || [];
+      if (!pend.length) { alert("Não há parecer pendente."); return; }
+      const escolha = await selectParecerRecebido(pend);
+      if (!escolha) return;
+      $receber.disabled = true;
+      try {
+        await ensureSession();
+        const { error } = await supabase.rpc("receive_parecer", { p_processo_id: currentRowId, p_orgao: escolha });
+        if (error) throw error;
+        if (row) {
+          row.pareceres_pendentes = (row.pareceres_pendentes || []).filter(p => p !== escolha);
+        }
+        const hist = await getHistorico(currentRowId);
+        await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
+        if (row) row.pareceres_recebidos = extractPareceresRecebidos(hist);
+        const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
+        histPane.innerHTML = viewHistorico(titulo, hist);
+        buildViewData();
+        renderGridPreservandoScroll();
+        $parecer.disabled = (row?.pareceres_pendentes?.length || 0) >= PARECER_OPCOES.length;
+        $msg.textContent = "Parecer recebido.";
+      } catch (e) {
+        $msg.textContent = "Erro ao registrar parecer: " + e.message;
+      } finally {
+        $receber.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
       }
     });
 
