@@ -167,6 +167,7 @@ function ensureLayoutCSS() {
     :root{
       --w-nup: clamp(20ch, 22ch, 26ch);
       --w-tipo: clamp(8ch, 10ch, 14ch);
+      --w-parecer: clamp(6ch, 8ch, 10ch);
       --w-entrada: clamp(10ch, 12ch, 16ch);
       --w-prazo: clamp(8ch, 10ch, 12ch);
     }
@@ -180,6 +181,7 @@ function ensureLayoutCSS() {
       grid-template-columns:
         var(--w-nup)
         var(--w-tipo)
+        var(--w-parecer)
         minmax(0, 1.4fr)
         var(--w-entrada)
         var(--w-prazo)
@@ -210,6 +212,8 @@ function ensureLayoutCSS() {
     .sort-btn.active { background:#e9e9e9; font-weight:bold; }
 
     .proc-grid-row.row-selected { outline:2px solid #999; outline-offset:-1px; }
+
+    .badge-pendente{ background:#f8d7da; color:#721c24; border-color:#f5c6cb; }
 
     /* Histórico */
     :root{
@@ -282,6 +286,7 @@ function viewTabela(listView, sort) {
       ${headerCell("nup","NUP",sort)}
       ${headerCell("tipo","Tipo",sort)}
       ${headerCell("status","Status",sort)}
+      ${headerCell("parecer","Parecer",sort)}
       ${headerCell("entrada","1ª Entrada<br>Regional",sort)}
       ${headerCell("prazo","Prazo<br>Regional",sort)}
       ${headerCell("atualizadoPor","Atualizado por",sort)}
@@ -293,6 +298,7 @@ function viewTabela(listView, sort) {
       <div>${v.nup}</div>
       <div>${v.tipo}</div>
       <div>${v.status}</div>
+      <div>${v.parecerDisplay}</div>
       <div>${v.entrada || ""}</div>
       <div>${v.prazoDisplay}</div>
       <div class="small">${v.atualizadoPor || ""}</div>
@@ -364,6 +370,9 @@ function viewFormulario() {
         </div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-salvar" disabled>Salvar</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-excluir" disabled>Excluir</button></div>
+      </div>
+      <div class="proc-form-row">
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-parecer" disabled>Solicitar Parecer</button></div>
       </div>
       <div id="msg-novo" class="small" style="margin-top:6px"></div>
     </div>
@@ -500,7 +509,8 @@ export default {
     const $limpar = el("#btn-limpar");
     const $salvar = el("#btn-salvar");
     const $excluir = el("#btn-excluir");
-    const $msg = el("#msg-novo");
+    const $parecer = el("#btn-parecer");
+     const $msg = el("#msg-novo");
     const gridWrap = el("#grid");
     const histPane = el("#hist-pane");
     const root = container;
@@ -538,7 +548,7 @@ export default {
       if (clearNup) $nup.value = "";
       $tipo.value = ""; $entrada.value = ""; $status.value = "";
       $tipo.disabled = true; $entrada.disabled = true; $status.disabled = true;
-      $salvar.disabled = true; $excluir.disabled = true;
+      $salvar.disabled = true; $excluir.disabled = true; $parecer.disabled = true;
       currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
       pinnedId = null; // remove o pino ao limpar
     }
@@ -558,7 +568,7 @@ export default {
       $status.disabled = false;
 
       $salvar.disabled = false;
-      $excluir.disabled = true;
+      $excluir.disabled = true; $parecer.disabled = true;
 
       $msg.textContent = "Preencha os campos e clique em Salvar.";
       histPane.innerHTML = viewHistorico(`Histórico — ${nupMasked}`, []);
@@ -581,7 +591,7 @@ export default {
 
       $salvar.disabled = true;
       $excluir.disabled = false;
-
+      $parecer.disabled = !!row.parecer_pendente;
       $msg.textContent = "Processo encontrado. Altere o Status se necessário ou veja o Histórico.";
     }
     function perguntaCriar(on) {
@@ -610,7 +620,9 @@ export default {
           nup: displayNUP(r.nup),   // <<< garante máscara na lista
           tipo: r.tipo,
           status: r.status,
-          entrada: r.entrada_regional || "",
+          parecerPend: !!r.parecer_pendente,
+          parecerDisplay: r.parecer_pendente ? '<span class="badge badge-pendente">Pendente</span>' : '-',
+           entrada: r.entrada_regional || "",
           atualizadoPor: r.modificado_por || "",
           atualizado: r.updated_at ? new Date(r.updated_at).getTime() : 0,
           atualizadoStr: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
@@ -626,7 +638,8 @@ export default {
         switch (key) {
           case "nup": return v.nup || "";
           case "tipo": return v.tipo || "";
-          case "status": return v.status || "";
+         case "parecer": return v.parecerPend ? 1 : 0;
+           case "status": return v.status || "";
           case "entrada": return v.entradaTS ?? -Infinity;
           case "prazo": return (v.prazoDisplay === "Sobrestado") ? Number.POSITIVE_INFINITY : (v.prazoTS ?? Number.POSITIVE_INFINITY);
           case "atualizadoPor": return v.atualizadoPor || "";
@@ -843,6 +856,23 @@ export default {
         resetForm(true); histPane.innerHTML = viewHistorico("Histórico", []);
         await refreshFirstPage(); $nup.focus();
       } catch (e) { alert("Erro ao excluir: " + e.message); }
+    });
+
+         $parecer.addEventListener("click", async () => {
+      if (!currentRowId) { alert("Busque um processo antes de solicitar parecer."); return; }
+      $parecer.disabled = true;
+      try {
+        const { error } = await supabase.rpc("request_parecer", { p_processo_id: currentRowId });
+        if (error) throw error;
+        const row = allList.find(r => String(r.id) === String(currentRowId));
+        if (row) row.parecer_pendente = true;
+        buildViewData();
+        renderGridPreservandoScroll();
+        $msg.textContent = "Parecer solicitado.";
+      } catch (e) {
+        $msg.textContent = "Erro ao solicitar parecer: " + e.message;
+        $parecer.disabled = false;
+      }
     });
 
     // Inicialização
