@@ -135,6 +135,60 @@ function calcularPrazoUnit(p, hist = []) {
   return base ? new Date(base.getTime() + 60 * DIA_MS).toISOString().slice(0, 10) : "";
 }
 
+
+/* =========================
+   Seleção múltipla de parecer
+   ========================= */
+function selectParecerOptions(options) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    Object.assign(overlay.style, {
+      position: "fixed",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: "rgba(0,0,0,0.3)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 9999,
+    });
+
+    const box = document.createElement("div");
+    Object.assign(box.style, {
+      background: "#fff",
+      padding: "12px",
+      border: "1px solid #ccc",
+      borderRadius: "4px",
+      minWidth: "200px",
+    });
+    box.innerHTML = `
+      <label>Selecione os pareceres:</label><br/>
+      <select id="parecer-select" multiple size="${Math.min(options.length, 5)}" style="width:100%; margin-top:4px;">
+        ${options.map(o => `<option value="${o}">${o}</option>`).join("")}
+      </select>
+      <div style="margin-top:8px; text-align:right;">
+        <button id="parecer-ok">OK</button>
+        <button id="parecer-cancel" type="button" style="margin-left:6px;">Cancelar</button>
+      </div>
+    `;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const select = box.querySelector("#parecer-select");
+    box.querySelector("#parecer-ok").addEventListener("click", () => {
+      const values = Array.from(select.selectedOptions).map((o) => o.value);
+      document.body.removeChild(overlay);
+      resolve(values);
+    });
+    box.querySelector("#parecer-cancel").addEventListener("click", () => {
+      document.body.removeChild(overlay);
+      resolve([]);
+    });
+  });
+}
+
 /* =========================
    CSS (grid, rolagens, etc.)
    ========================= */
@@ -864,11 +918,10 @@ export default {
       if (!currentRowId) { alert("Busque um processo antes de solicitar parecer."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
       const pend = row?.pareceres_pendentes || [];
-      const escolhas = PARECER_OPCOES
-        .filter(p => !pend.includes(p))
-        .filter(p => confirm(`Solicitar parecer ${p}?`));
+      const disponiveis = PARECER_OPCOES.filter(p => !pend.includes(p));
+      const escolhas = await selectParecerOptions(disponiveis);
       if (!escolhas.length) return;
-            $parecer.disabled = true;
+      $parecer.disabled = true;
       try {
         const { error } = await supabase.rpc("request_parecer", { p_processo_id: currentRowId, p_orgaos: escolhas });
         if (error) throw error;
@@ -877,8 +930,8 @@ export default {
         }
         buildViewData();
         renderGridPreservandoScroll();
-         $parecer.disabled = (row?.pareceres_pendentes?.length || 0) >= PARECER_OPCOES.length;
-         $msg.textContent = "Parecer solicitado.";
+        $parecer.disabled = (row?.pareceres_pendentes?.length || 0) >= PARECER_OPCOES.length;
+        $msg.textContent = "Parecer solicitado.";
       } catch (e) {
         $msg.textContent = "Erro ao solicitar parecer: " + e.message;
         $parecer.disabled = false;
