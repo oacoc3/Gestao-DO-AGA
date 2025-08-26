@@ -5,6 +5,25 @@
 
 import { supabase } from "../supabaseClient.js";
 
+// Cache para exibir "Posto/Graduação" e "Nome de Guerra" em vez do e-mail
+const userCache = new Map();
+async function fetchProfilesByEmails(emails) {
+  const list = Array.from(new Set(emails.filter(e => e && !userCache.has(e))));
+  if (!list.length) return;
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("email, posto_graduacao, nome_guerra")
+    .in("email", list);
+  if (error) throw error;
+  (data || []).forEach(p => {
+    const display = [p.posto_graduacao, p.nome_guerra].filter(Boolean).join(" ");
+    userCache.set(p.email, display);
+  });
+}
+function displayUser(email) {
+  return userCache.get(email) || email || "";
+}
+
 /* =========================
    Constantes de domínio
    ========================= */
@@ -221,7 +240,7 @@ function ensureLayoutCSS() {
     :root{
       --w-nup: clamp(20ch, 22ch, 26ch);
       --w-tipo: clamp(8ch, 10ch, 14ch);
-      --w-parecer: clamp(10ch, 14ch, 18ch);
+      --w-parecer: clamp(12ch, 16ch, 22ch);
       --w-entrada: clamp(10ch, 12ch, 16ch);
       --w-prazo: clamp(8ch, 10ch, 12ch);
     }
@@ -235,8 +254,8 @@ function ensureLayoutCSS() {
       grid-template-columns:
         var(--w-nup)
         var(--w-tipo)
-        var(--w-parecer)
         minmax(0, 1.4fr)
+        var(--w-parecer)
         var(--w-entrada)
         var(--w-prazo)
         minmax(0, 1fr)
@@ -281,7 +300,6 @@ function ensureLayoutCSS() {
       display:grid;
       grid-template-columns:
         var(--w-hist-data)
-        minmax(0, 1fr)
         minmax(0, 1fr)
         var(--w-hist-autor);
       gap:0;
@@ -369,15 +387,19 @@ function viewTabela(listView, sort) {
 function viewHistorico(title, hist) {
   const header = `
     <div class="hist-header">
-      <div>Data/Hora</div><div>De</div><div>Para</div><div>Por</div>
+      <div>Data/Hora</div><div>Mudança</div><div>Por</div>
     </div>
   `;
   const rows = (hist || []).map(h => {
-    const autor = h.changed_by_email || h.changed_by || "(desconhecido)";
+    const autor = displayUser(h.changed_by_email) || h.changed_by || "(desconhecido)";
     const quando = new Date(h.changed_at).toLocaleString();
-    const de = h.old_status ?? "(criação)";
-    const para = h.new_status ?? "(sem status)";
-    return `<div class="hist-row"><div>${quando}</div><div>${de}</div><div>${para}</div><div>${autor}</div></div>`;
+    let mudanca = h.new_status || "";
+    if (!mudanca) {
+      const p = h.parecer || h.parecer_solicitado || h.orgao;
+      if (p) mudanca = `Parecer ${Array.isArray(p) ? p.join(', ') : p} solicitado`;
+    }
+    if (!mudanca) mudanca = h.old_status || "(sem registro)";
+    return `<div class="hist-row"><div>${quando}</div><div>${mudanca}</div><div>${autor}</div></div>`;
   }).join("");
 
   return `
@@ -385,7 +407,7 @@ function viewHistorico(title, hist) {
     <div class="pane-body">
       <div class="hist-scroll">
         ${header}
-        ${rows || `<div class="hist-row"><div colspan="4">Sem histórico.</div></div>`}
+        ${rows || `<div class="hist-row"><div colspan="3">Sem histórico.</div></div>`}
       </div>
     </div>
   `;
@@ -447,7 +469,8 @@ function bindTabela(container, refresh, onPickRow) {
         container.querySelectorAll(".proc-grid-row").forEach(r => r.classList.remove("row-selected"));
         row.classList.add("row-selected");
         const hist = await getHistorico(id);
-        const pane = document.getElementById("hist-pane");
+        await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
+         const pane = document.getElementById("hist-pane");
         pane.innerHTML = viewHistorico(`Histórico — ${nupMasked}`, hist);
       } catch (e) {
         alert("Erro ao carregar histórico: " + e.message);
@@ -679,7 +702,7 @@ export default {
             ? r.pareceres_pendentes.map(p => `<span class="badge badge-parecer">${p}</span>`).join(" ")
             : '-',
            entrada: r.entrada_regional || "",
-          atualizadoPor: r.modificado_por || "",
+          atualizadoPor: displayUser(r.modificado_por),
           atualizado: r.updated_at ? new Date(r.updated_at).getTime() : 0,
           atualizadoStr: r.updated_at ? new Date(r.updated_at).toLocaleString() : "",
           prazoDisplay: prazoStr,
@@ -766,7 +789,8 @@ export default {
     async function upsertPinnedRow(row) {
       if (!allList.some(r => String(r.id) === String(row.id))) {
         allList.push(row);
-        const hist = await getHistorico(row.id);
+        await fetchProfilesByEmails([row.modificado_por].filter(Boolean));
+         const hist = await getHistorico(row.id);
         const prazo = calcularPrazoUnit(row, hist);
         prazosMap.set(row.id, prazo);
         buildViewData();
@@ -793,7 +817,8 @@ export default {
     async function assimilateRows(rows) {
       if (!rows || !rows.length) return;
       allList = allList.concat(rows);
-      const ids = rows.map(r => r.id);
+      await fetchProfilesByEmails(rows.map(r => r.modificado_por).filter(Boolean));
+       const ids = rows.map(r => r.id);
       const historicos = await getHistoricoBatch(ids);
       const prazosSub = calcularPrazosMapa(rows, historicos);
       prazosSub.forEach((v, k) => prazosMap.set(k, v));
