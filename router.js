@@ -5,6 +5,8 @@ export function addRoute(path, handler) {
   routes.set(path, handler);
 }
 
+export let routerStarted = false;
+
 export function startRouter(container) {
   function render() {
     const hash = window.location.hash || "#/dashboard";
@@ -14,4 +16,9 @@ export function startRouter(container) {
   }
   window.addEventListener("hashchange", render);
   render();
+  routerStarted = true;
+  return function stopRouter() {
+    window.removeEventListener("hashchange", render);
+    routerStarted = false;
+  };
 }
