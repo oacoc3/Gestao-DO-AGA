@@ -433,11 +433,11 @@ function ensureLayoutCSS() {
     .sort-btn.active { background:#e9e9e9; font-weight:bold; }
 
     .proc-grid-row.row-selected { outline:2px solid #999; outline-offset:-1px; }
-    .badge-parecer{ font-size:10px; padding:1px 4px; border:1px solid transparent; }
+    .badge-parecer{ font-size:10px; padding:1px 4px; border:1px solid transparent; line-height:1.1; }
+    .badge-parecer .sub{ font-size:8px; display:block; }
     .badge-parecer.pendente{ background:#f8d7da; color:#721c24; border-color:#f5c6cb; }
     .badge-parecer.recebido{ background:#d4edda; color:#155724; border-color:#c3e6cb; }
-    .badge-parecer.expedir{ background:#e2e3e5; color:#383d41; border-color:#d6d8db; line-height:1.1; }
-    .badge-parecer.expedir .exp-label{ font-size:8px; display:block; }
+    .badge-parecer.expedir{ background:#e2e3e5; color:#383d41; border-color:#d6d8db; }
 
     /* Histórico */
     :root{
@@ -864,9 +864,9 @@ export default {
           parecerCount: (r.pareceres_pendentes || []).length + (r.pareceres_a_expedir || []).length,
           parecerDisplay: (function(){
             const parts = PARECER_OPCOES.map(p => {
-              if (r.pareceres_a_expedir?.includes(p)) return `<span class="badge badge-parecer expedir">${p}<span class="exp-label">EXPEDIR</span></span>`;
-              if (r.pareceres_pendentes?.includes(p)) return `<span class="badge badge-parecer pendente">${p}</span>`;
-              if (r.pareceres_recebidos?.includes(p)) return `<span class="badge badge-parecer recebido">${p}</span>`;
+              if (r.pareceres_a_expedir?.includes(p)) return `<span class="badge badge-parecer expedir">${p}<span class="sub">EXPEDIR</span></span>`;
+              if (r.pareceres_pendentes?.includes(p)) return `<span class="badge badge-parecer pendente">${p}<span class="sub">SOLICITADO</span></span>`;
+              if (r.pareceres_recebidos?.includes(p)) return `<span class="badge badge-parecer recebido">${p}<span class="sub">RECEBIDO</span></span>`;
               return "";
             }).filter(Boolean);
             return parts.length ? parts.join("") : '-';
