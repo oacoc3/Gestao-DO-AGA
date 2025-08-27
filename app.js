@@ -8,7 +8,17 @@ import { createClient as createSbClient } from "https://esm.sh/@supabase/supabas
 const appContainer = document.getElementById("app");
 const navEl = document.getElementById("nav");
 const authArea = document.getElementById("auth-area");
+const datetimeEl = document.getElementById("datetime");
 
+function updateDateTime() {
+  const now = new Date();
+  datetimeEl.textContent = now.toLocaleString("pt-BR");
+}
+
+if (datetimeEl) {
+  updateDateTime();
+  setInterval(updateDateTime, 1000);
+}
 let currentModules = [];
 
 /* ========= Utilidades de URL ========= */
