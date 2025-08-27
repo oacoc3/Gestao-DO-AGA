@@ -2,10 +2,10 @@
 import dashboard from "./dashboard.js";
 import processos from "./processos.js";
 import administracao from "./administracao.js";
-
+import prazos from "./prazos.js";
 // Retorna a lista de módulos conforme o perfil do usuário
 export function getModules(perfil) {
-  const mods = [dashboard, processos];
+  const mods = [dashboard, processos, prazos];
   if (perfil === "Administrador") mods.push(administracao);
   return mods;
 }
