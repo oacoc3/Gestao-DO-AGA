@@ -37,3 +37,7 @@ document.addEventListener("visibilitychange", () => {
     ensureSession().catch((e) => console.error("Falha ao renovar sessão:", e));
   }
 });
+// Renovação periódica para evitar expiração após inatividade
+setInterval(() => {
+  ensureSession().catch((e) => console.error("Falha ao renovar sessão:", e));
+}, 5 * 60 * 1000);
