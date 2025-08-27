@@ -621,11 +621,11 @@ function viewFormulario() {
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-excluir" disabled>Excluir</button></div>
       </div>
       <div class="proc-form-row">
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-parecer" disabled>Parecer(es) Necessário(s)</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-comunic" disabled>Comunicação(ões) Necessária(s)</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-parecer" disabled>Registrar Solicitação de Parecer Interno</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-comunic" disabled>Registrar Necessidade de Parecer Externo</button></div>
         <!-- >>> Patch: texto do botão alterado -->
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>SIGADAER Expedido(s)</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Recebimentos</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>Registra Necessidade de SIGADAER</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Registrar Expedição de SIGADAER</button></div>
       </div>
       <div id="msg-novo" class="small" style="margin-top:6px"></div>
     </div>
@@ -1167,7 +1167,7 @@ export default {
     });
 
     $parecer.addEventListener("click", async () => {
-      if (!currentRowId) { alert("Busque um processo antes de solicitar parecer."); return; }
+      if (!currentRowId) { alert("Busque um processo antes de registrar solicitação de parecer interno."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
       const pend = [...(row?.pareceres_pendentes || []), ...(row?.pareceres_a_expedir || [])];
       const disponiveis = PARECER_OPCOES.filter(p => !pend.includes(p));
@@ -1200,19 +1200,19 @@ export default {
         $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
         $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
         $receber.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || (row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
-        $msg.textContent = "Parecer solicitado.";
+        $msg.textContent = "Solicitação de parecer interno registrada.";
       } catch (e) {
-        $msg.textContent = "Erro ao solicitar parecer: " + e.message;
+        $msg.textContent = "Erro ao registrar solicitação de parecer interno: " + e.message;
         $parecer.disabled = false;
       }
     });
 
     $comunic.addEventListener("click", async () => {
-      if (!currentRowId) { alert("Busque um processo antes de registrar comunicação."); return; }
+      if (!currentRowId) { alert("Busque um processo antes de registrar necessidade de parecer externo."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
       const pend = [...(row?.comunicacoes_pendentes || []), ...(row?.comunicacoes_a_expedir || [])];
       const disponiveis = COMUNICACOES_OPCOES.filter(p => !pend.includes(p));
-      const escolhas = await selectParecerOptions(disponiveis, "a Comunicação");
+      const escolhas = await selectParecerOptions(disponiveis, "o Parecer Externo");
       if (!escolhas.length) return;
       $comunic.disabled = true;
       try {
@@ -1237,16 +1237,16 @@ export default {
         $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
         $expedir.disabled = !((row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length) || (row?.pareceres_a_expedir && row.pareceres_a_expedir.length));
         $receber.disabled = !((row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length) || (row?.pareceres_pendentes && row.pareceres_pendentes.length));
-        $msg.textContent = "Comunicação registrada.";
+        $msg.textContent = "Necessidade de parecer externo registrada.";
       } catch (e) {
-        $msg.textContent = "Erro ao registrar comunicação: " + e.message;
+        $msg.textContent = "Erro ao registrar necessidade de parecer externo: " + e.message;
         $comunic.disabled = false;
       }
     });
 
     $expedir.addEventListener("click", async () => {
       // >>> Patch: mensagem mais clara
-      if (!currentRowId) { alert("Busque um processo antes de registrar SIGADAER Expedido(s)."); return; }
+      if (!currentRowId) { alert("Busque um processo antes de registrar necessidade de SIGADAER."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
       const pendParecer = row?.pareceres_a_expedir || [];
       const pendCom = row?.comunicacoes_a_expedir || [];
@@ -1289,16 +1289,16 @@ export default {
         $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
         $receber.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || (row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
         // >>> Patch: texto de confirmação atualizado
-        $msg.textContent = "SIGADAER registrado como expedido.";
+        $msg.textContent = "Necessidade de SIGADAER registrada.";
       } catch (e) {
-        $msg.textContent = "Erro ao expedir: " + e.message;
+        $msg.textContent = "Erro ao registrar necessidade de SIGADAER: " + e.message;
       } finally {
         $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
       }
     });
     
     $receber.addEventListener("click", async () => {
-      if (!currentRowId) { alert("Busque um processo antes de registrar recebimento."); return; }
+      if (!currentRowId) { alert("Busque um processo antes de registrar expedição de SIGADAER."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
       const pendParecer = row?.pareceres_pendentes || [];
       const pendCom = row?.comunicacoes_pendentes || [];
@@ -1337,9 +1337,9 @@ export default {
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
         $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
         $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
-        $msg.textContent = "Recebimento registrado.";
+        $msg.textContent = "Expedição de SIGADAER registrada.";
       } catch (e) {
-        $msg.textContent = "Erro ao registrar recebimento: " + e.message;
+        $msg.textContent = "Erro ao registrar expedição de SIGADAER: " + e.message;
       } finally {
         $receber.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || (row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
         const totalPend2 = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
