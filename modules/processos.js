@@ -622,7 +622,6 @@ function viewFormulario() {
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-parecer" disabled>Parecer(es) Necessário(s)</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-comunic" disabled>Comunicação(ões) Necessária(s)</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>Expedir SIGADAER</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Receber Parecer</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Recebimentos</button></div>
       </div>
       <div id="msg-novo" class="small" style="margin-top:6px"></div>
