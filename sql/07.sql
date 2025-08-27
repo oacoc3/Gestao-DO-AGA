@@ -27,14 +27,20 @@ begin
     from unnest(coalesce(p_orgaos, '{}')) as s(o);
 
   update public.processos
-    set pareceres_a_expedir = (
-      select array_agg(distinct unnest)
-      from unnest(coalesce(pareceres_a_expedir, '{}') || coalesce(v_expedir, '{}')) as unnest
-    ),
-        pareceres_pendentes = (
-      select array_agg(distinct unnest)
-      from unnest(coalesce(pareceres_pendentes, '{}') || coalesce(v_pender, '{}')) as unnest
-    )
+    set pareceres_a_expedir = coalesce(
+        (
+          select array_agg(distinct unnest)
+          from unnest(coalesce(pareceres_a_expedir, '{}') || coalesce(v_expedir, '{}')) as unnest
+        ),
+        '{}'
+      ),
+        pareceres_pendentes = coalesce(
+        (
+          select array_agg(distinct unnest)
+          from unnest(coalesce(pareceres_pendentes, '{}') || coalesce(v_pender, '{}')) as unnest
+        ),
+        '{}'
+      )
     where id = p_processo_id;
 
   insert into public.status_history (processo_id, parecer_solicitado, changed_by, changed_by_email)
