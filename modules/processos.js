@@ -408,7 +408,7 @@ function ensureLayoutCSS() {
     .proc-form-row > div { display:flex; flex-direction:column; }
     .proc-form-row label { font-size:0.95rem; margin-bottom:2px; }
     .proc-form-row input, .proc-form-row select, .proc-form-row button { height:34px; }
-    .proc-form-row button { width:130px; white-space:normal; }
+    .proc-form-row button { width:130px; white-space:normal; font-size:11px; height:auto; min-height:34px; line-height:1.2; }
 
     /* Split: processos 65%, histórico 35% */
     .proc-split { display:flex; gap:10px; overflow:hidden; }
@@ -422,7 +422,7 @@ function ensureLayoutCSS() {
     :root{
       --w-nup: 20ch;
       --w-tipo: clamp(14ch, 18ch, 24ch);
-      --w-notif: clamp(8ch, 10ch, 12ch);
+      --w-notif: clamp(16ch, 20ch, 28ch);
       --w-parecer: clamp(16ch, 20ch, 26ch);
       --w-entrada: clamp(10ch, 12ch, 16ch);
       --w-prazo: clamp(8ch, 10ch, 12ch);
@@ -483,7 +483,7 @@ function ensureLayoutCSS() {
     .badge-parecer.pendente{ background:#fff3cd; color:#856404; border-color:#ffeeba; }
     .badge-parecer.recebido{ background:#d4edda; color:#155724; border-color:#c3e6cb; }
     .badge-parecer.expedir{ background:#f8d7da; color:#721c24; border-color:#f5c6cb; }
-    .badge-notif{ font-size:14px; padding:1px 4px; border:1px solid transparent; line-height:1.1; }
+    .badge-notif{ font-size:10px; padding:1px 4px; border:1px solid transparent; line-height:1.1; white-space:normal; text-align:center; }
     .badge-notif .sub{ font-size:8px; display:block; }
     .badge-notif.pendente{ background:#fff3cd; color:#856404; border-color:#ffeeba; }
     .badge-notif.recebido{ background:#d4edda; color:#155724; border-color:#c3e6cb; }
@@ -508,14 +508,6 @@ function ensureLayoutCSS() {
     .hist-header{
       position: sticky; top: 0; z-index:2;
       background:#fff; border-bottom:1px solid #ddd;
-    }
-    .hist-header > div, .hist-row > div{
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      text-align: center;
-      padding: 4px 6px;
-      font-size: 12px;
     }
   `;
   document.head.appendChild(style);
@@ -618,8 +610,17 @@ function viewHistorico(title, hist) {
       } else if (h.parecer_solicitado) {
         const p = Array.isArray(h.parecer_solicitado) ? h.parecer_solicitado.join(', ') : h.parecer_solicitado;
         mudanca = `Solicitado Parecer ${p}`;
-      } else if (h.comunicacao_solicitada || h.orgao) {
-        const c = h.comunicacao_solicitada || h.orgao;
+      } else if (h.comunicacao_expedida) {
+        const c = Array.isArray(h.comunicacao_expedida) ? h.comunicacao_expedida.join(', ') : h.comunicacao_expedida;
+        mudanca = `Enviada Notificação ${c}`;
+      } else if (h.comunicacao) {
+        const c = Array.isArray(h.comunicacao) ? h.comunicacao.join(', ') : h.comunicacao;
+        mudanca = `Ciência da Notificação ${c}`;
+      } else if (h.comunicacao_solicitada) {
+        const c = Array.isArray(h.comunicacao_solicitada) ? h.comunicacao_solicitada.join(', ') : h.comunicacao_solicitada;
+        mudanca = `Solicitada Notificação ${c}`;
+      } else if (h.orgao) {
+        const c = h.orgao;
         mudanca = `Solicitada Confecção de SIGADAER ${Array.isArray(c) ? c.join(', ') : c}`;
       }
     }
@@ -675,11 +676,11 @@ function viewFormulario() {
       <div class="proc-form-row">
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-parecer" disabled>Parecer Interno</button></div>
         <!-- >>> Patch: adiciona botões de expedição e recebimento -->
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>Nec. SIGADAER</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Exp. SIGADAER</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>Necessidade SIGADAER</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Expedição SIGADAER</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-recebimento" disabled>Recebimento</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-envio-notificacao" disabled>Envio Notificação</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-ciencia-notificacao" disabled>Ciência Notificação</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-envio-notificacao" disabled>Registrar Envio de Notificação</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-ciencia-notificacao" disabled>Registrar Ciência de Notificação</button></div>
       </div>
       <div id="msg-novo" class="small" style="margin-top:6px"></div>
     </div>
@@ -958,10 +959,10 @@ export default {
             const cientes = r.comunicacoes_cientes || [];
             const parts = NOTIFICACAO_OPCOES.map(p => {
               if (pend.includes(p)) {
-                return `<span class="badge badge-notif pendente">&#9888;<span class="sub">ENVIADA</span></span>`;
+                return `<span class="badge badge-notif pendente">${p}<span class="sub">ENVIADA</span></span>`;
               }
               if (cientes.includes(p)) {
-                return `<span class="badge badge-notif recebido">&#9989;<span class="sub">CIENTE</span></span>`;
+                return `<span class="badge badge-notif recebido">${p}<span class="sub">CIENTE</span></span>`;
               }
               return "";
             }).filter(Boolean);
