@@ -36,6 +36,7 @@ const STATUS = [
 ];
 const PARECER_OPCOES = ["ATM", "DT", "CGNA", "COMAE", "COMGAP", "COMPREP", "OPR AD"];
 const SIGADAER_ORGAOS = ["COMAE", "COMGAP", "COMPREP"];
+const COMUNICACOES_OPCOES = ["ANAC", "GABAER", "Prefeitura", "JJAER"];
 /* =========================
    Máscara / validação NUP
    ========================= */
@@ -134,7 +135,7 @@ async function getHistoricoBatch(ids) {
   await ensureSession();
   const { data, error } = await supabase
     .from("status_history")
-    .select("processo_id, old_status, new_status, changed_at, changed_by_email, changed_by, parecer")
+    .select("processo_id, old_status, new_status, changed_at, changed_by_email, changed_by, parecer, comunicacao")
     .in("processo_id", ids);
   if (error) throw error;
   return data;
@@ -196,10 +197,21 @@ function extractPareceresRecebidos(hist = []) {
   return Array.from(set);
 }
 
+function extractComunicacoesRecebidas(hist = []) {
+  const set = new Set();
+  for (const h of hist) {
+    const c = h.comunicacao;
+    if (!c) continue;
+    if (Array.isArray(c)) c.forEach(v => set.add(v));
+    else set.add(c);
+  }
+  return Array.from(set);
+}
+
 /* =========================
    Seleção múltipla de parecer
    ========================= */
-function selectParecerOptions(options) {
+function selectParecerOptions(options, titulo = "o Parecer") {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     Object.assign(overlay.style, {
@@ -224,7 +236,7 @@ function selectParecerOptions(options) {
       minWidth: "200px",
     });
     box.innerHTML = `
-      <label>Selecione o Parecer:</label><br/>
+      <label>Selecione ${titulo}:</label><br/>
       <select id="parecer-select" multiple size="${Math.min(options.length, 5)}" style="width:100%; margin-top:4px;">
         ${options.map(o => `<option value="${o}">${o}</option>`).join("")}
       </select>
@@ -248,8 +260,7 @@ function selectParecerOptions(options) {
     });
   });
 }
-
-function selectParecerRecebido(options) {
+function selectParecerRecebido(options, titulo = "o Parecer") {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     Object.assign(overlay.style, {
@@ -274,7 +285,7 @@ function selectParecerRecebido(options) {
       minWidth: "200px",
     });
     box.innerHTML = `
-      <label>Selecione o Parecer:</label><br/>
+      <label>Selecione ${titulo}:</label><br/>
       <select id="parecer-select" size="${Math.min(options.length, 5)}" style="width:100%; margin-top:4px;">
         ${options.map(o => `<option value="${o}">${o}</option>`).join("")}
       </select>
@@ -300,7 +311,7 @@ function selectParecerRecebido(options) {
 }
 
 
-function selectParecerExpedir(options) {
+function selectParecerExpedir(options, titulo = "o Parecer para Expedir") {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
     Object.assign(overlay.style, {
@@ -325,7 +336,7 @@ function selectParecerExpedir(options) {
       minWidth: "200px",
     });
     box.innerHTML = `
-      <label>Selecione o Parecer para Expedir:</label><br/>
+      <label>Selecione ${titulo}:</label><br/>
       <select id="parecer-select" size="${Math.min(options.length, 5)}" style="width:100%; margin-top:4px;">
         ${options.map(o => `<option value="${o}">${o}</option>`).join("")}
       </select>
@@ -383,6 +394,7 @@ function ensureLayoutCSS() {
       --w-nup: clamp(20ch, 22ch, 26ch);
       --w-tipo: clamp(8ch, 10ch, 14ch);
       --w-parecer: clamp(16ch, 20ch, 26ch);
+     --w-comunic: clamp(16ch, 20ch, 26ch);
       --w-entrada: clamp(10ch, 12ch, 16ch);
       --w-prazo: clamp(8ch, 10ch, 12ch);
     }
@@ -398,6 +410,7 @@ function ensureLayoutCSS() {
         var(--w-tipo)
         minmax(0, 1.4fr)
         var(--w-parecer)
+        var(--w-comunic)
         var(--w-entrada)
         var(--w-prazo);
       gap: 0;
@@ -416,7 +429,8 @@ function ensureLayoutCSS() {
       padding: 4px 6px;
       font-size: 12px;
     }
-    .proc-grid-row > div:nth-child(4){
+    .proc-grid-row > div:nth-child(4),
+    .proc-grid-row > div:nth-child(5){
       white-space: normal;
       overflow: visible;
       text-overflow: unset;
@@ -510,6 +524,7 @@ function viewTabela(listView, sort) {
       ${headerCell("tipo","Tipo",sort)}
       ${headerCell("status","Status",sort)}
       ${headerCell("parecer","Pareceres",sort)}
+      ${headerCell("comunic","Comunicações<br>Externas",sort)}
       ${headerCell("entrada","1ª Entrada<br>Regional",sort)}
       ${headerCell("prazo","Prazo<br>Regional",sort)}
     </div>
@@ -520,6 +535,7 @@ function viewTabela(listView, sort) {
       <div>${v.tipo}</div>
       <div>${v.status}</div>
       <div>${v.parecerDisplay}</div>
+      <div>${v.comunicacaoDisplay}</div>
       <div>${v.entrada || ""}</div>
       <div>${v.prazoDisplay}</div>
     </div>
@@ -603,9 +619,11 @@ function viewFormulario() {
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-excluir" disabled>Excluir</button></div>
       </div>
       <div class="proc-form-row">
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-parecer" disabled>Solicitar Parecer</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-parecer" disabled>Parecer(es) Necessário(s)</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-comunic" disabled>Comunicação(ões) Necessária(s)</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>Expedir SIGADAER</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Receber Parecer</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Recebimentos</button></div>
       </div>
       <div id="msg-novo" class="small" style="margin-top:6px"></div>
     </div>
@@ -745,6 +763,7 @@ export default {
     const $salvar = el("#btn-salvar");
     const $excluir = el("#btn-excluir");
     const $parecer = el("#btn-parecer");
+    const $comunic = el("#btn-comunic");
     const $expedir = el("#btn-expedir");
     const $receber = el("#btn-receber");
     const $msg = el("#msg-novo");
@@ -785,7 +804,7 @@ export default {
       if (clearNup) $nup.value = "";
       $tipo.value = ""; $entrada.value = ""; $status.value = "";
       $tipo.disabled = true; $entrada.disabled = true; $status.disabled = true;
-      $salvar.disabled = true; $excluir.disabled = true; $parecer.disabled = true; $expedir.disabled = true; $receber.disabled = true;
+      $salvar.disabled = true; $excluir.disabled = true; $parecer.disabled = true; $comunic.disabled = true; $expedir.disabled = true; $receber.disabled = true;
       currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
       pinnedId = null; // remove o pino ao limpar
     }
@@ -805,7 +824,7 @@ export default {
       $status.disabled = false;
 
       $salvar.disabled = false;
-     $excluir.disabled = true; $parecer.disabled = true; $expedir.disabled = true; $receber.disabled = true;
+     $excluir.disabled = true; $parecer.disabled = true; $comunic.disabled = true; $expedir.disabled = true; $receber.disabled = true;
 
       $msg.textContent = "Preencha os campos e clique em Salvar.";
       histPane.innerHTML = viewHistorico(`Histórico — ${nupMasked}`, []);
@@ -829,9 +848,11 @@ export default {
       $salvar.disabled = true;
       $excluir.disabled = false;
       const totalPend = (row.pareceres_pendentes?.length || 0) + (row.pareceres_a_expedir?.length || 0);
+      const totalCom = (row.comunicacoes_pendentes?.length || 0) + (row.comunicacoes_a_expedir?.length || 0);
       $parecer.disabled = totalPend >= PARECER_OPCOES.length;
-      $expedir.disabled = !(row.pareceres_a_expedir && row.pareceres_a_expedir.length);
-      $receber.disabled = !(row.pareceres_pendentes && row.pareceres_pendentes.length);
+      $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
+      $expedir.disabled = !((row.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
+      $receber.disabled = !((row.pareceres_pendentes && row.pareceres_pendentes.length) || (row.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
       $msg.textContent = "Processo encontrado. Altere o Status se necessário ou veja o Histórico.";
     }
     function perguntaCriar(on) {
@@ -871,6 +892,16 @@ export default {
             }).filter(Boolean);
             return parts.length ? parts.join("") : '-';
           })(),
+          comunicacaoCount: (r.comunicacoes_pendentes || []).length + (r.comunicacoes_a_expedir || []).length,
+          comunicacaoDisplay: (function(){
+            const parts = COMUNICACOES_OPCOES.map(p => {
+              if (r.comunicacoes_a_expedir?.includes(p)) return `<span class="badge badge-parecer expedir">${p}<span class="sub">EXPEDIR</span></span>`;
+              if (r.comunicacoes_pendentes?.includes(p)) return `<span class="badge badge-parecer pendente">${p}<span class="sub">EXPEDIDO</span></span>`;
+              if (r.comunicacoes_recebidas?.includes(p)) return `<span class="badge badge-parecer recebido">${p}<span class="sub">RECEBIDO</span></span>`;
+              return "";
+            }).filter(Boolean);
+            return parts.length ? parts.join("") : '-';
+          })(),
           entrada: formatDateShort(r.entrada_regional),
           prazoDisplay: prazoDisplay,
           prazoTS: prazoStrRaw && prazoStrRaw !== "Sobrestado" ? new Date(prazoStrRaw).getTime() : null,
@@ -884,8 +915,9 @@ export default {
         switch (key) {
           case "nup": return v.nup || "";
           case "tipo": return v.tipo || "";
-         case "parecer": return v.parecerCount || 0;
-           case "status": return v.status || "";
+          case "parecer": return v.parecerCount || 0;
+          case "comunic": return v.comunicacaoCount || 0;
+          case "status": return v.status || "";
           case "entrada": return v.entradaTS ?? -Infinity;
           case "prazo": return (v.prazoDisplay === "Sobrestado") ? Number.POSITIVE_INFINITY : (v.prazoTS ?? Number.POSITIVE_INFINITY);
           default: return "";
@@ -957,6 +989,7 @@ export default {
         const hist = await getHistorico(row.id);
         const prazo = calcularPrazoUnit(row, hist);
         row.pareceres_recebidos = extractPareceresRecebidos(hist);
+        row.comunicacoes_recebidas = extractComunicacoesRecebidas(hist);
         prazosMap.set(row.id, prazo);
         buildViewData();
       }
@@ -987,15 +1020,24 @@ export default {
       const prazosSub = calcularPrazosMapa(rows, historicos);
       prazosSub.forEach((v, k) => prazosMap.set(k, v));
       const recebidosMap = new Map();
+      const comunicMap = new Map();
       historicos.forEach(h => {
-        if (!h.parecer) return;
-        const arr = Array.isArray(h.parecer) ? h.parecer : [h.parecer];
-        const set = recebidosMap.get(h.processo_id) || new Set();
-        arr.forEach(v => set.add(v));
-        recebidosMap.set(h.processo_id, set);
+        if (h.parecer) {
+          const arr = Array.isArray(h.parecer) ? h.parecer : [h.parecer];
+          const set = recebidosMap.get(h.processo_id) || new Set();
+          arr.forEach(v => set.add(v));
+          recebidosMap.set(h.processo_id, set);
+        }
+        if (h.comunicacao) {
+          const arr = Array.isArray(h.comunicacao) ? h.comunicacao : [h.comunicacao];
+          const set = comunicMap.get(h.processo_id) || new Set();
+          arr.forEach(v => set.add(v));
+          comunicMap.set(h.processo_id, set);
+        }
       });
       rows.forEach(r => {
         r.pareceres_recebidos = Array.from(recebidosMap.get(r.id) || []);
+         r.comunicacoes_recebidas = Array.from(comunicMap.get(r.id) || []);
       });
       buildViewData();
       renderGridPreservandoScroll();
@@ -1119,7 +1161,7 @@ export default {
       const row = allList.find(r => String(r.id) === String(currentRowId));
       const pend = [...(row?.pareceres_pendentes || []), ...(row?.pareceres_a_expedir || [])];
       const disponiveis = PARECER_OPCOES.filter(p => !pend.includes(p));
-      const escolhas = await selectParecerOptions(disponiveis);
+      const escolhas = await selectParecerOptions(disponiveis, "o Parecer");
       if (!escolhas.length) return;
       $parecer.disabled = true;
       try {
@@ -1143,83 +1185,155 @@ export default {
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
+           const totalCom = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
-        $expedir.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
-        $receber.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
+        $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
+        $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
+        $receber.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || (row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
         $msg.textContent = "Parecer solicitado.";
       } catch (e) {
         $msg.textContent = "Erro ao solicitar parecer: " + e.message;
         $parecer.disabled = false;
       }
     });
+
+    $comunic.addEventListener("click", async () => {
+      if (!currentRowId) { alert("Busque um processo antes de registrar comunicação."); return; }
+      const row = allList.find(r => String(r.id) === String(currentRowId));
+      const pend = [...(row?.comunicacoes_pendentes || []), ...(row?.comunicacoes_a_expedir || [])];
+      const disponiveis = COMUNICACOES_OPCOES.filter(p => !pend.includes(p));
+      const escolhas = await selectParecerOptions(disponiveis, "a Comunicação");
+      if (!escolhas.length) return;
+      $comunic.disabled = true;
+      try {
+        await ensureSession();
+        const { error } = await supabase.rpc("request_comunicacao", { p_processo_id: currentRowId, p_orgaos: escolhas });
+        if (error) throw error;
+        if (row) {
+          escolhas.forEach(o => {
+            row.comunicacoes_a_expedir = Array.from(new Set([...(row.comunicacoes_a_expedir || []), o]));
+          });
+        }
+        const hist = await getHistorico(currentRowId);
+        await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
+        if (row) row.comunicacoes_recebidas = extractComunicacoesRecebidas(hist);
+        const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
+        histPane.innerHTML = viewHistorico(titulo, hist);
+        buildViewData();
+        renderGridPreservandoScroll();
+        const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
+        const totalCom = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
+        $parecer.disabled = totalPend >= PARECER_OPCOES.length;
+        $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
+        $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
+        $receber.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || (row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
+        $msg.textContent = "Comunicação registrada.";
+      } catch (e) {
+        $msg.textContent = "Erro ao registrar comunicação: " + e.message;
+        $comunic.disabled = false;
+      }
+    });
     $expedir.addEventListener("click", async () => {
       if (!currentRowId) { alert("Busque um processo antes de expedir SIGADAER."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
-      const pend = row?.pareceres_a_expedir || [];
-      if (!pend.length) { alert("Não há parecer para expedir."); return; }
-      const escolha = await selectParecerExpedir(pend);
+      const pendParecer = row?.pareceres_a_expedir || [];
+      const pendCom = row?.comunicacoes_a_expedir || [];
+      const pend = [...pendParecer, ...pendCom];
+      if (!pend.length) { alert("Não há itens para expedir."); return; }
+      const escolha = await selectParecerExpedir(pend, "o Tipo para Expedir");
       if (!escolha) return;
       $expedir.disabled = true;
       try {
         await ensureSession();
-        const { error } = await supabase.rpc("expedir_sigadaer", { p_processo_id: currentRowId, p_orgao: escolha });
-        if (error) throw error;
-        if (row) {
-          row.pareceres_a_expedir = (row.pareceres_a_expedir || []).filter(p => p !== escolha);
-          row.pareceres_pendentes = Array.from(new Set([...(row.pareceres_pendentes || []), escolha]));
+        if (COMUNICACOES_OPCOES.includes(escolha)) {
+          const { error } = await supabase.rpc("expedir_comunicacao", { p_processo_id: currentRowId, p_orgao: escolha });
+          if (error) throw error;
+          if (row) {
+            row.comunicacoes_a_expedir = (row.comunicacoes_a_expedir || []).filter(p => p !== escolha);
+            row.comunicacoes_pendentes = Array.from(new Set([...(row.comunicacoes_pendentes || []), escolha]));
+          }
+        } else {
+          const { error } = await supabase.rpc("expedir_sigadaer", { p_processo_id: currentRowId, p_orgao: escolha });
+          if (error) throw error;
+          if (row) {
+            row.pareceres_a_expedir = (row.pareceres_a_expedir || []).filter(p => p !== escolha);
+            row.pareceres_pendentes = Array.from(new Set([...(row.pareceres_pendentes || []), escolha]));
+          }
         }
         const hist = await getHistorico(currentRowId);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
-        if (row) row.pareceres_recebidos = extractPareceresRecebidos(hist);
+        if (row) {
+          row.pareceres_recebidos = extractPareceresRecebidos(hist);
+          row.comunicacoes_recebidas = extractComunicacoesRecebidas(hist);
+        }
         const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
         histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
+           const totalCom = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
-        $expedir.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
-        $receber.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
+        $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
+        $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
+        $receber.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || (row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
         $msg.textContent = "SIGADAER expedido.";
       } catch (e) {
         $msg.textContent = "Erro ao expedir: " + e.message;
       } finally {
-        $expedir.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
+        $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
       }
     });
     
     $receber.addEventListener("click", async () => {
-      if (!currentRowId) { alert("Busque um processo antes de receber parecer."); return; }
+      if (!currentRowId) { alert("Busque um processo antes de registrar recebimento."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
-      const pend = row?.pareceres_pendentes || [];
-      if (!pend.length) { alert("Não há parecer pendente."); return; }
-      const escolha = await selectParecerRecebido(pend);
+      const pendParecer = row?.pareceres_pendentes || [];
+      const pendCom = row?.comunicacoes_pendentes || [];
+      const pend = [...pendParecer, ...pendCom];
+      if (!pend.length) { alert("Não há itens pendentes."); return; }
+      const escolha = await selectParecerRecebido(pend, "o Tipo");
       if (!escolha) return;
       $receber.disabled = true;
       try {
         await ensureSession();
-        const { error } = await supabase.rpc("receive_parecer", { p_processo_id: currentRowId, p_orgao: escolha });
-        if (error) throw error;
-        if (row) {
-          row.pareceres_pendentes = (row.pareceres_pendentes || []).filter(p => p !== escolha);
+        if (COMUNICACOES_OPCOES.includes(escolha)) {
+          const { error } = await supabase.rpc("receive_comunicacao", { p_processo_id: currentRowId, p_orgao: escolha });
+          if (error) throw error;
+          if (row) {
+            row.comunicacoes_pendentes = (row.comunicacoes_pendentes || []).filter(p => p !== escolha);
+          }
+        } else {
+          const { error } = await supabase.rpc("receive_parecer", { p_processo_id: currentRowId, p_orgao: escolha });
+          if (error) throw error;
+          if (row) {
+            row.pareceres_pendentes = (row.pareceres_pendentes || []).filter(p => p !== escolha);
+          }
         }
         const hist = await getHistorico(currentRowId);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
-        if (row) row.pareceres_recebidos = extractPareceresRecebidos(hist);
+        if (row) {
+          row.pareceres_recebidos = extractPareceresRecebidos(hist);
+          row.comunicacoes_recebidas = extractComunicacoesRecebidas(hist);
+        }
         const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
         histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
+         const totalCom = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
-        $expedir.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
-        $msg.textContent = "Parecer recebido.";
+        $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
+        $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
+        $msg.textContent = "Recebimento registrado.";
       } catch (e) {
-        $msg.textContent = "Erro ao registrar parecer: " + e.message;
+        $msg.textContent = "Erro ao registrar recebimento: " + e.message;
       } finally {
-        $receber.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
+            $receber.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || (row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
         const totalPend2 = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
+          const totalCom2 = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
         $parecer.disabled = totalPend2 >= PARECER_OPCOES.length;
-        $expedir.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
+        $comunic.disabled = totalCom2 >= COMUNICACOES_OPCOES.length;
+        $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
       }
     });
 
