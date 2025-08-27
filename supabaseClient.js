@@ -30,3 +30,10 @@ export async function ensureSession() {
     if (refreshError) throw refreshError;
   }
 }
+
+// Mantém a sessão ativa ao retornar para a página
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    ensureSession().catch((e) => console.error("Falha ao renovar sessão:", e));
+  }
+});
