@@ -51,6 +51,12 @@ const SIGADAER_OPCOES = [
   "JJAER",
   "AGU",
 ];
+// Tipos extras disponíveis apenas no recebimento
+const RECEBIMENTO_EXTRA_MAP = {
+  PDIR: "ANAC - PDIR",
+  "Exploração": "SAC - Exploração",
+};
+const RECEBIMENTO_EXTRA_OPCOES = Object.values(RECEBIMENTO_EXTRA_MAP);
 // Opções de notificação
 const NOTIFICACAO_OPCOES = [
   "Favorável - Não Iniciada",
@@ -63,6 +69,7 @@ const NOTIFICACAO_OPCOES = [
 const ALL_PARECERES = Array.from(new Set([
   ...PARECER_OPCOES,
   ...SIGADAER_OPCOES,
+  ...RECEBIMENTO_EXTRA_OPCOES,
 ]));
 
 /* =========================
@@ -926,7 +933,8 @@ export default {
       const usedSigCount = SIGADAER_OPCOES.filter(p => usedSig.has(p)).length;
       $expedir.disabled = usedSigCount >= SIGADAER_OPCOES.length;
       $receber.disabled = !(row.pareceres_a_expedir && row.pareceres_a_expedir.length);
-      $recebimento.disabled = !(row.pareceres_pendentes && row.pareceres_pendentes.length);
+      const extraRec = RECEBIMENTO_EXTRA_MAP[row.tipo];
+      $recebimento.disabled = !((row.pareceres_pendentes && row.pareceres_pendentes.length) || extraRec);
       const notifPend = row.comunicacoes_pendentes || [];
       const notifCientes = row.comunicacoes_cientes || [];
       $envioNotif.disabled = (notifPend.length + notifCientes.length) >= NOTIFICACAO_OPCOES.length;
@@ -1287,7 +1295,8 @@ export default {
         const usedSig = new Set([...(row?.pareceres_a_expedir || []), ...(row?.pareceres_pendentes || []), ...(row?.pareceres_recebidos || [])]);
         $expedir.disabled = SIGADAER_OPCOES.every(p => usedSig.has(p));
         $receber.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
-        $recebimento.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
+        const extraRec = RECEBIMENTO_EXTRA_MAP[row?.tipo];
+        $recebimento.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || extraRec);
         $msg.textContent = "Solicitação de parecer interno registrada.";
       } catch (e) {
         $msg.textContent = "Erro ao registrar solicitação de parecer interno: " + e.message;
@@ -1325,7 +1334,8 @@ export default {
         const usedSig = new Set([...(row.pareceres_a_expedir || []), ...(row.pareceres_pendentes || []), ...(row.pareceres_recebidos || [])]);
         $expedir.disabled = SIGADAER_OPCOES.every(p => usedSig.has(p));
         $receber.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
-        $recebimento.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
+        const extraRec = RECEBIMENTO_EXTRA_MAP[row?.tipo];
+        $recebimento.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || extraRec);
         $msg.textContent = "Necessidade de SIGADAER registrada.";
       } catch (e) {
         $msg.textContent = "Erro ao registrar necessidade de SIGADAER: " + e.message;
@@ -1364,7 +1374,8 @@ export default {
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
         const usedSig = new Set([...(row?.pareceres_a_expedir || []), ...(row?.pareceres_pendentes || []), ...(row?.pareceres_recebidos || [])]);
         $expedir.disabled = SIGADAER_OPCOES.every(p => usedSig.has(p));
-        $recebimento.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
+        const extraRec = RECEBIMENTO_EXTRA_MAP[row?.tipo];
+        $recebimento.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || extraRec);
         $msg.textContent = "Expedição de SIGADAER registrada.";
       } catch (e) {
         $msg.textContent = "Erro ao registrar expedição de SIGADAER: " + e.message;
@@ -1376,7 +1387,8 @@ export default {
     $recebimento.addEventListener("click", async () => {
       if (!currentRowId) { alert("Busque um processo antes de registrar recebimento."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
-      const pend = row?.pareceres_pendentes || [];
+      const extra = RECEBIMENTO_EXTRA_MAP[row?.tipo];
+      const pend = Array.from(new Set([...(row?.pareceres_pendentes || []), ...(extra ? [extra] : [])]));
       if (!pend.length) { alert("Não há itens pendentes."); return; }
       const escolha = await selectParecerRecebido(pend, "o Tipo");
       if (!escolha) return;
@@ -1407,7 +1419,8 @@ export default {
       } catch (e) {
         $msg.textContent = "Erro ao registrar recebimento: " + e.message;
       } finally {
-        $recebimento.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
+        const extraRec = RECEBIMENTO_EXTRA_MAP[row?.tipo];
+        $recebimento.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || extraRec);
       }
     });
 
