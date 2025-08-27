@@ -5,7 +5,6 @@ const CATEGORIAS = [
   { code: "PARECER_DT", title: "Pareceres DT" },
   { code: "PARECER_CGNA", title: "Pareceres CGNA" },
   { code: "PARECER_COMPREP", title: "Pareceres COMPREP" },
-  { code: "PARECER_COMAE", title: "Pareceres COMAE" },
   { code: "PARECER_COMGAP", title: "Pareceres COMGAP" },
   { code: "TERMINO_OBRA", title: "Término de Obra" },
   { code: "REBAIXAMENTO_REMOCAO", title: "Rebaixamento/Remoção" },
