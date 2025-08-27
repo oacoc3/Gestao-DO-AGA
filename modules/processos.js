@@ -44,7 +44,8 @@ const SIGADAER_OPCOES = [
   "COMPREP",
   "COMGAP",
   "OPR AD",
-  "Prefeitura(s)",
+  "Município",
+  "Estado",
   "SAC",
   "GABAER",
   "JJAER",
@@ -1285,7 +1286,7 @@ export default {
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
         const usedSig = new Set([...(row?.pareceres_a_expedir || []), ...(row?.pareceres_pendentes || []), ...(row?.pareceres_recebidos || [])]);
         $expedir.disabled = SIGADAER_OPCOES.every(p => usedSig.has(p));
-        $receber.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
+        $receber_DISABLED = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
         $msg.textContent = "Recebimento registrado.";
       } catch (e) {
         $msg.textContent = "Erro ao registrar recebimento: " + e.message;
