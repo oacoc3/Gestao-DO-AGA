@@ -1,6 +1,6 @@
 // app.js – Bootstrap do app: autenticação + rotas + menu
 import { supabase } from "./supabaseClient.js";
-import { startRouter, addRoute } from "./router.js";
+import { startRouter, addRoute, routerStarted } from "./router.js";
 import { getModules, buildNav } from "./modules/index.js";
 // Import ESM (ECMAScript Module) direto da CDN para uso no navegador
 import { createClient as createSbClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -20,6 +20,7 @@ if (datetimeEl) {
   setInterval(updateDateTime, 1000);
 }
 let currentModules = [];
+let stopRouter = null;
 
 /* ========= Utilidades de URL ========= */
 function getAuthFlowType() {
@@ -225,6 +226,10 @@ function renderSetPassword(rc, flowType) {
 /* ========= Proteção de rotas ========= */
 function guardRoutes(session) {
   if (!session?.user) {
+    if (routerStarted && typeof stopRouter === "function") {
+      stopRouter();
+      stopRouter = null;
+    }
     appContainer.innerHTML = `
       <div class="container">
         <div class="card"><h3>Faça login para continuar.</h3></div>
@@ -236,7 +241,9 @@ function guardRoutes(session) {
     if (cleaned || !window.location.hash || !window.location.hash.startsWith("#/")) {
       window.location.hash = "#/dashboard";
     }
-    startRouter(appContainer);
+    if (!routerStarted) {
+      stopRouter = startRouter(appContainer);
+    }
   }
 }
 
