@@ -51,7 +51,20 @@ const SIGADAER_OPCOES = [
   "JJAER",
   "AGU",
 ];
-const ALL_PARECERES = Array.from(new Set([...PARECER_OPCOES, ...SIGADAER_OPCOES]));
+// Opções de notificação
+const NOTIFICACAO_OPCOES = [
+  "Favorável - Não Iniciada",
+  "Favorável - Em andamento",
+  "Favorável - Concluída",
+  "Desfavorável - Remoção/Rebaixamento",
+  "Desfavorável - JJAER",
+  "Informar Término de Obra",
+];
+const ALL_PARECERES = Array.from(new Set([
+  ...PARECER_OPCOES,
+  ...SIGADAER_OPCOES,
+  ...NOTIFICACAO_OPCOES,
+]));
 /* =========================
    Máscara / validação NUP
    ========================= */
@@ -384,6 +397,7 @@ function ensureLayoutCSS() {
     .proc-form-row > div { display:flex; flex-direction:column; }
     .proc-form-row label { font-size:0.95rem; margin-bottom:2px; }
     .proc-form-row input, .proc-form-row select, .proc-form-row button { height:34px; }
+    .proc-form-row button { width:130px; white-space:normal; }
 
     /* Split: processos 65%, histórico 35% */
     .proc-split { display:flex; gap:10px; overflow:hidden; }
@@ -395,8 +409,8 @@ function ensureLayoutCSS() {
 
     /* Grid de processos */
     :root{
-      --w-nup: clamp(20ch, 22ch, 26ch);
-      --w-tipo: clamp(8ch, 10ch, 14ch);
+      --w-nup: 20ch;
+      --w-tipo: clamp(14ch, 18ch, 24ch);
       --w-parecer: clamp(16ch, 20ch, 26ch);
       --w-entrada: clamp(10ch, 12ch, 16ch);
       --w-prazo: clamp(8ch, 10ch, 12ch);
@@ -644,6 +658,8 @@ function viewFormulario() {
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>Registrar Necessidade de SIGADAER</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Registrar Expedição de SIGADAER</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-recebimento" disabled>Registrar Recebimento</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-envio-notificacao" disabled>Registrar Envio de Notificação</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-ciencia-notificacao" disabled>Registrar Ciência de Notificação</button></div>
       </div>
       <div id="msg-novo" class="small" style="margin-top:6px"></div>
     </div>
@@ -793,6 +809,8 @@ export default {
     const $expedir = el("#btn-expedir");
     const $receber = el("#btn-receber");
     const $recebimento = el("#btn-recebimento");
+    const $envioNotif = el("#btn-envio-notificacao");
+    const $cienciaNotif = el("#btn-ciencia-notificacao");
     const $msg = el("#msg-novo");
     const gridWrap = el("#grid");
     const histPane = el("#hist-pane");
@@ -832,7 +850,7 @@ export default {
       if (clearNup) $nup.value = "";
       $tipo.value = ""; $entrada.value = ""; $status.value = "";
       $tipo.disabled = true; $entrada.disabled = true; $status.disabled = true;
-      $salvar.disabled = true; $excluir.disabled = true; $parecer.disabled = true; $expedir.disabled = true; $receber.disabled = true; $recebimento.disabled = true;
+      $salvar.disabled = true; $excluir.disabled = true; $parecer.disabled = true; $expedir.disabled = true; $receber.disabled = true; $recebimento.disabled = true; $envioNotif.disabled = true; $cienciaNotif.disabled = true;
       currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
       pinnedId = null; // remove o pino ao limpar
     }
@@ -852,7 +870,7 @@ export default {
       $status.disabled = false;
 
       $salvar.disabled = false;
-      $excluir.disabled = true; $parecer.disabled = true; $expedir.disabled = true; $receber.disabled = true;
+      $excluir.disabled = true; $parecer.disabled = true; $expedir.disabled = true; $receber.disabled = true; $recebimento.disabled = true; $envioNotif.disabled = true; $cienciaNotif.disabled = true;
 
       $msg.textContent = "Preencha os campos e clique em Salvar.";
       histPane.innerHTML = viewHistorico(`Histórico — ${nupMasked}`, []);
@@ -882,6 +900,9 @@ export default {
       $expedir.disabled = usedSigCount >= SIGADAER_OPCOES.length;
       $receber.disabled = !(row.pareceres_a_expedir && row.pareceres_a_expedir.length);
       $recebimento.disabled = !(row.pareceres_pendentes && row.pareceres_pendentes.length);
+      const notifPend = row.comunicacoes_pendentes || [];
+      $envioNotif.disabled = notifPend.length >= NOTIFICACAO_OPCOES.length;
+      $cienciaNotif.disabled = !(notifPend && notifPend.length);
       $msg.textContent = "Processo encontrado. Altere o Status se necessário ou veja o Histórico.";
     }
     function perguntaCriar(on) {
@@ -911,7 +932,7 @@ export default {
           nup: displayNUP(r.nup),   // <<< garante máscara na lista
           tipo: r.tipo,
           status: r.status,
-          parecerCount: (r.pareceres_pendentes || []).length + (r.pareceres_a_expedir || []).length,
+          parecerCount: (r.pareceres_pendentes || []).length + (r.pareceres_a_expedir || []).length + (r.comunicacoes_pendentes || []).length,
           parecerDisplay: (function(){
             const parts = ALL_PARECERES.map(p => {
               if (r.pareceres_a_expedir?.includes(p)) {
@@ -923,6 +944,9 @@ export default {
               }
               if (r.pareceres_recebidos?.includes(p)) {
                 return `<span class="badge badge-parecer recebido">${p}<span class="sub">RECEBIDO</span></span>`;
+              }
+              if (r.comunicacoes_pendentes?.includes(p)) {
+                return `<span class="badge badge-parecer pendente">${p}<span class="sub">ENVIADA</span></span>`;
               }
               return "";
             }).filter(Boolean);
@@ -1326,6 +1350,70 @@ export default {
         $msg.textContent = "Erro ao registrar recebimento: " + e.message;
       } finally {
         $recebimento.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
+      }
+    });
+
+    $envioNotif.addEventListener("click", async () => {
+      if (!currentRowId) { alert("Busque um processo antes de registrar envio de notificação."); return; }
+      const row = allList.find(r => String(r.id) === String(currentRowId));
+      const pend = row?.comunicacoes_pendentes || [];
+      const disponiveis = NOTIFICACAO_OPCOES.filter(p => !pend.includes(p));
+      const escolha = await selectParecerExpedir(disponiveis, "a Notificação");
+      if (!escolha) return;
+      $envioNotif.disabled = true;
+      try {
+        await ensureSession();
+        const { error } = await supabase.rpc("request_comunicacao", { p_processo_id: currentRowId, p_orgaos: [escolha] });
+        if (error) throw error;
+        const { error: e2 } = await supabase.rpc("expedir_comunicacao", { p_processo_id: currentRowId, p_orgao: escolha });
+        if (e2) throw e2;
+        if (row) {
+          row.comunicacoes_pendentes = Array.from(new Set([...(row.comunicacoes_pendentes || []), escolha]));
+        }
+        const hist = await getHistorico(currentRowId);
+        await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
+        const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
+        histPane.innerHTML = viewHistorico(titulo, hist);
+        buildViewData();
+        renderGridPreservandoScroll();
+        $msg.textContent = "Envio de notificação registrado.";
+      } catch (e) {
+        $msg.textContent = "Erro ao registrar envio de notificação: " + e.message;
+      } finally {
+        const pendAtual = row?.comunicacoes_pendentes || [];
+        $envioNotif.disabled = pendAtual.length >= NOTIFICACAO_OPCOES.length;
+        $cienciaNotif.disabled = !(pendAtual.length);
+      }
+    });
+
+    $cienciaNotif.addEventListener("click", async () => {
+      if (!currentRowId) { alert("Busque um processo antes de registrar ciência de notificação."); return; }
+      const row = allList.find(r => String(r.id) === String(currentRowId));
+      const pend = row?.comunicacoes_pendentes || [];
+      if (!pend.length) { alert("Não há notificações pendentes."); return; }
+      const escolha = await selectParecerExpedir(pend, "a Notificação para Ciência");
+      if (!escolha) return;
+      $cienciaNotif.disabled = true;
+      try {
+        await ensureSession();
+        const { error } = await supabase.rpc("receive_comunicacao", { p_processo_id: currentRowId, p_orgao: escolha });
+        if (error) throw error;
+        if (row) {
+          row.comunicacoes_pendentes = (row.comunicacoes_pendentes || []).filter(p => p !== escolha);
+        }
+        const hist = await getHistorico(currentRowId);
+        await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
+        const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
+        histPane.innerHTML = viewHistorico(titulo, hist);
+        buildViewData();
+        renderGridPreservandoScroll();
+        $msg.textContent = "Ciência de notificação registrada.";
+      } catch (e) {
+        $msg.textContent = "Erro ao registrar ciência de notificação: " + e.message;
+      } finally {
+        const pendAtual = row?.comunicacoes_pendentes || [];
+        $envioNotif.disabled = pendAtual.length >= NOTIFICACAO_OPCOES.length;
+        $cienciaNotif.disabled = !(pendAtual.length);
       }
     });
 
