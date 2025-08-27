@@ -42,6 +42,7 @@ const SIGADAER_ORGAOS = [];
 const COMUNICACOES_OPCOES = ["COMGAP", "COMAE", "COMPREP", "OPR AD"];
 // Órgãos adicionais para necessidade de SIGADAER
 const SIGADAER_EXTRA = ["ANAC", "Prefeitura(s)", "JJAER", "AGU", "SAC", "GABAER"];
+const ALL_PARECERES = Array.from(new Set([...PARECER_OPCOES, ...COMUNICACOES_OPCOES, ...SIGADAER_EXTRA]));
 /* =========================
    Máscara / validação NUP
    ========================= */
@@ -566,13 +567,16 @@ function viewHistorico(title, hist) {
     if (!mudanca) {
       if (h.parecer) {
         const p = Array.isArray(h.parecer) ? h.parecer.join(', ') : h.parecer;
-        mudanca = `Parecer ${p} recebido`;
+        mudanca = `Recebido Parecer/Doc ${p}`;
       } else if (h.parecer_expedido) {
         const p = Array.isArray(h.parecer_expedido) ? h.parecer_expedido.join(', ') : h.parecer_expedido;
-        mudanca = `Parecer ${p} expedido`;
-      } else {
-        const p = h.parecer_solicitado || h.orgao;
-        if (p) mudanca = `Parecer ${Array.isArray(p) ? p.join(', ') : p} solicitado`;
+        mudanca = `Expedido SIGADAER ${p}`;
+      } else if (h.parecer_solicitado) {
+        const p = Array.isArray(h.parecer_solicitado) ? h.parecer_solicitado.join(', ') : h.parecer_solicitado;
+        mudanca = `Solicitado Parecer ${p}`;
+      } else if (h.comunicacao_solicitada || h.orgao) {
+        const c = h.comunicacao_solicitada || h.orgao;
+        mudanca = `Solicitada Confecção de SIGADAER ${Array.isArray(c) ? c.join(', ') : c}`;
       }
     }
     if (!mudanca) mudanca = h.old_status || "(sem registro)";
@@ -630,7 +634,7 @@ function viewFormulario() {
         <!-- >>> Patch: adiciona botões de expedição e recebimento -->
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>Registrar Necessidade de SIGADAER</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Registrar Expedição de SIGADAER</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-recebimento" disabled>Registra Recebimento</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-recebimento" disabled>Registrar Recebimento</button></div>
       </div>
       <div id="msg-novo" class="small" style="margin-top:6px"></div>
     </div>
@@ -893,14 +897,17 @@ export default {
           status: r.status,
           parecerCount: (r.pareceres_pendentes || []).length + (r.pareceres_a_expedir || []).length,
           parecerDisplay: (function(){
-            const parts = PARECER_OPCOES.map(p => {
-              if (r.pareceres_a_expedir?.includes(p)) return `<span class="badge badge-parecer expedir">${p}<span class="sub">EXPEDIR</span></span>`;
-              // >>> Patch: pendente mostra "EXPEDIDO" para órgãos SIGADAER, senão "SOLICITADO"
-              if (r.pareceres_pendentes?.includes(p)) {
-                const sub = SIGADAER_ORGAOS.includes(p) ? "EXPEDIDO" : "SOLICITADO";
-                return `<span class="badge badge-parecer pendente">${p}<span class="sub">${sub}</span></span>`;
+            const parts = ALL_PARECERES.map(p => {
+              if (r.pareceres_a_expedir?.includes(p)) {
+                return `<span class="badge badge-parecer expedir">${p}<span class="sub">SOLICITADO</span></span>`;
               }
-              if (r.pareceres_recebidos?.includes(p)) return `<span class="badge badge-parecer recebido">${p}<span class="sub">RECEBIDO</span></span>`;
+              if (r.pareceres_pendentes?.includes(p)) {
+                const sub = PARECER_OPCOES.includes(p) ? "SOLICITADO" : "EXPEDIDO";
+                return `<span class="badge badge-parecer expedir">${p}<span class="sub">${sub}</span></span>`;
+              }
+              if (r.pareceres_recebidos?.includes(p)) {
+                return `<span class="badge badge-parecer recebido">${p}<span class="sub">RECEBIDO</span></span>`;
+              }
               return "";
             }).filter(Boolean);
             return parts.length ? parts.join("") : '-';
