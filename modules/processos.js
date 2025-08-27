@@ -38,11 +38,19 @@ const STATUS = [
 const PARECER_OPCOES = ["ATM", "DT", "CGNA"];
 // Nenhum órgão interno gera necessidade automática de SIGADAER
 const SIGADAER_ORGAOS = [];
-// Opções de parecer externo
-const COMUNICACOES_OPCOES = ["COMGAP", "COMAE", "COMPREP", "OPR AD"];
-// Órgãos adicionais para necessidade de SIGADAER
-const SIGADAER_EXTRA = ["ANAC", "Prefeitura(s)", "JJAER", "AGU", "SAC", "GABAER"];
-const ALL_PARECERES = Array.from(new Set([...PARECER_OPCOES, ...COMUNICACOES_OPCOES, ...SIGADAER_EXTRA]));
+// Opções disponíveis para SIGADAER
+const SIGADAER_OPCOES = [
+  "COMAE",
+  "COMPREP",
+  "COMGAP",
+  "OPR AD",
+  "Prefeitura(s)",
+  "SAC",
+  "GABAER",
+  "JJAER",
+  "AGU",
+];
+const ALL_PARECERES = Array.from(new Set([...PARECER_OPCOES, ...SIGADAER_OPCOES]));
 /* =========================
    Máscara / validação NUP
    ========================= */
@@ -141,7 +149,7 @@ async function getHistoricoBatch(ids) {
   await ensureSession();
   const { data, error } = await supabase
     .from("status_history")
-    .select("processo_id, old_status, new_status, changed_at, changed_by_email, changed_by, parecer, comunicacao")
+    .select("processo_id, old_status, new_status, changed_at, changed_by_email, changed_by, parecer")
     .in("processo_id", ids);
   if (error) throw error;
   return data;
@@ -199,17 +207,6 @@ function extractPareceresRecebidos(hist = []) {
     if (!p) continue;
     if (Array.isArray(p)) p.forEach(v => set.add(v));
     else set.add(p);
-  }
-  return Array.from(set);
-}
-
-function extractComunicacoesRecebidas(hist = []) {
-  const set = new Set();
-  for (const h of hist) {
-    const c = h.comunicacao;
-    if (!c) continue;
-    if (Array.isArray(c)) c.forEach(v => set.add(v));
-    else set.add(c);
   }
   return Array.from(set);
 }
@@ -400,7 +397,6 @@ function ensureLayoutCSS() {
       --w-nup: clamp(20ch, 22ch, 26ch);
       --w-tipo: clamp(8ch, 10ch, 14ch);
       --w-parecer: clamp(16ch, 20ch, 26ch);
-     --w-comunic: clamp(16ch, 20ch, 26ch);
       --w-entrada: clamp(10ch, 12ch, 16ch);
       --w-prazo: clamp(8ch, 10ch, 12ch);
     }
@@ -416,7 +412,6 @@ function ensureLayoutCSS() {
         var(--w-tipo)
         minmax(0, 1.4fr)
         var(--w-parecer)
-        var(--w-comunic)
         var(--w-entrada)
         var(--w-prazo);
       gap: 0;
@@ -435,8 +430,7 @@ function ensureLayoutCSS() {
       padding: 4px 6px;
       font-size: 12px;
     }
-    .proc-grid-row > div:nth-child(4),
-    .proc-grid-row > div:nth-child(5){
+    .proc-grid-row > div:nth-child(4){
       white-space: normal;
       overflow: visible;
       text-overflow: unset;
@@ -531,7 +525,6 @@ function viewTabela(listView, sort) {
       ${headerCell("tipo","Tipo",sort)}
       ${headerCell("status","Status",sort)}
       ${headerCell("parecer","Pareceres",sort)}
-      ${headerCell("comunic","Comunicações<br>Externas",sort)}
       ${headerCell("entrada","1ª Entrada<br>Regional",sort)}
       ${headerCell("prazo","Prazo<br>Regional",sort)}
     </div>
@@ -542,7 +535,6 @@ function viewTabela(listView, sort) {
       <div>${v.tipo}</div>
       <div>${v.status}</div>
       <div>${v.parecerDisplay}</div>
-      <div>${v.comunicacaoDisplay}</div>
       <div>${v.entrada || ""}</div>
       <div>${v.prazoDisplay}</div>
     </div>
@@ -630,7 +622,6 @@ function viewFormulario() {
       </div>
       <div class="proc-form-row">
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-parecer" disabled>Registrar Solicitação de Parecer Interno</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-comunic" disabled>Registrar Necessidade de Parecer Externo</button></div>
         <!-- >>> Patch: adiciona botões de expedição e recebimento -->
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>Registrar Necessidade de SIGADAER</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Registrar Expedição de SIGADAER</button></div>
@@ -774,7 +765,6 @@ export default {
     const $salvar = el("#btn-salvar");
     const $excluir = el("#btn-excluir");
     const $parecer = el("#btn-parecer");
-    const $comunic = el("#btn-comunic");
     const $expedir = el("#btn-expedir");
     const $receber = el("#btn-receber");
     const $recebimento = el("#btn-recebimento");
@@ -816,7 +806,7 @@ export default {
       if (clearNup) $nup.value = "";
       $tipo.value = ""; $entrada.value = ""; $status.value = "";
       $tipo.disabled = true; $entrada.disabled = true; $status.disabled = true;
-      $salvar.disabled = true; $excluir.disabled = true; $parecer.disabled = true; $comunic.disabled = true; $expedir.disabled = true; $receber.disabled = true; $recebimento.disabled = true;
+      $salvar.disabled = true; $excluir.disabled = true; $parecer.disabled = true; $expedir.disabled = true; $receber.disabled = true; $recebimento.disabled = true;
       currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
       pinnedId = null; // remove o pino ao limpar
     }
@@ -836,7 +826,7 @@ export default {
       $status.disabled = false;
 
       $salvar.disabled = false;
-      $excluir.disabled = true; $parecer.disabled = true; $comunic.disabled = true; $expedir.disabled = true; $receber.disabled = true;
+      $excluir.disabled = true; $parecer.disabled = true; $expedir.disabled = true; $receber.disabled = true;
 
       $msg.textContent = "Preencha os campos e clique em Salvar.";
       histPane.innerHTML = viewHistorico(`Histórico — ${nupMasked}`, []);
@@ -860,10 +850,10 @@ export default {
       $salvar.disabled = true;
       $excluir.disabled = false;
       const totalPend = (row.pareceres_pendentes?.length || 0) + (row.pareceres_a_expedir?.length || 0);
-      const totalCom = row.comunicacoes_a_expedir?.length || 0;
       $parecer.disabled = totalPend >= PARECER_OPCOES.length;
-      $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
-      $expedir.disabled = false;
+      const usedSig = new Set([...(row.pareceres_a_expedir || []), ...(row.pareceres_pendentes || []), ...(row.pareceres_recebidos || [])]);
+      const usedSigCount = SIGADAER_OPCOES.filter(p => usedSig.has(p)).length;
+      $expedir.disabled = usedSigCount >= SIGADAER_OPCOES.length;
       $receber.disabled = !(row.pareceres_a_expedir && row.pareceres_a_expedir.length);
       $recebimento.disabled = !(row.pareceres_pendentes && row.pareceres_pendentes.length);
       $msg.textContent = "Processo encontrado. Altere o Status se necessário ou veja o Histórico.";
@@ -899,29 +889,15 @@ export default {
           parecerDisplay: (function(){
             const parts = ALL_PARECERES.map(p => {
               if (r.pareceres_a_expedir?.includes(p)) {
-                return `<span class="badge badge-parecer expedir">${p}<span class="sub">SOLICITADO</span></span>`;
+                return `<span class="badge badge-parecer expedir">${p}<span class="sub">EXPEDIR</span></span>`;
               }
               if (r.pareceres_pendentes?.includes(p)) {
                 const sub = PARECER_OPCOES.includes(p) ? "SOLICITADO" : "EXPEDIDO";
-                return `<span class="badge badge-parecer expedir">${p}<span class="sub">${sub}</span></span>`;
+                return `<span class="badge badge-parecer pendente">${p}<span class="sub">${sub}</span></span>`;
               }
               if (r.pareceres_recebidos?.includes(p)) {
                 return `<span class="badge badge-parecer recebido">${p}<span class="sub">RECEBIDO</span></span>`;
               }
-              return "";
-            }).filter(Boolean);
-            return parts.length ? parts.join("") : '-';
-          })(),
-          comunicacaoCount: (r.comunicacoes_pendentes || []).length + (r.comunicacoes_a_expedir || []).length,
-          comunicacaoDisplay: (function(){
-            const parts = COMUNICACOES_OPCOES.map(p => {
-              if (r.comunicacoes_a_expedir?.includes(p)) return `<span class="badge badge-parecer expedir">${p}<span class="sub">EXPEDIR</span></span>`;
-              // >>> Patch: pendente vira "recebido" visual para ANAC/Prefeitura/JJAER; rótulo "EXPEDIDO"
-              if (r.comunicacoes_pendentes?.includes(p)) {
-                const cls = ["ANAC", "Prefeitura", "JJAER"].includes(p) ? "recebido" : "pendente";
-                return `<span class="badge badge-parecer ${cls}">${p}<span class="sub">EXPEDIDO</span></span>`;
-              }
-              if (r.comunicacoes_recebidas?.includes(p)) return `<span class="badge badge-parecer recebido">${p}<span class="sub">RECEBIDO</span></span>`;
               return "";
             }).filter(Boolean);
             return parts.length ? parts.join("") : '-';
@@ -940,7 +916,6 @@ export default {
           case "nup": return v.nup || "";
           case "tipo": return v.tipo || "";
           case "parecer": return v.parecerCount || 0;
-          case "comunic": return v.comunicacaoCount || 0;
           case "status": return v.status || "";
           case "entrada": return v.entradaTS ?? -Infinity;
           case "prazo": return (v.prazoDisplay === "Sobrestado") ? Number.POSITIVE_INFINITY : (v.prazoTS ?? Number.POSITIVE_INFINITY);
@@ -1013,7 +988,6 @@ export default {
         const hist = await getHistorico(row.id);
         const prazo = calcularPrazoUnit(row, hist);
         row.pareceres_recebidos = extractPareceresRecebidos(hist);
-        row.comunicacoes_recebidas = extractComunicacoesRecebidas(hist);
         prazosMap.set(row.id, prazo);
         buildViewData();
       }
@@ -1044,7 +1018,6 @@ export default {
       const prazosSub = calcularPrazosMapa(rows, historicos);
       prazosSub.forEach((v, k) => prazosMap.set(k, v));
       const recebidosMap = new Map();
-      const comunicMap = new Map();
       historicos.forEach(h => {
         if (h.parecer) {
           const arr = Array.isArray(h.parecer) ? h.parecer : [h.parecer];
@@ -1052,16 +1025,9 @@ export default {
           arr.forEach(v => set.add(v));
           recebidosMap.set(h.processo_id, set);
         }
-        if (h.comunicacao) {
-          const arr = Array.isArray(h.comunicacao) ? h.comunicacao : [h.comunicacao];
-          const set = comunicMap.get(h.processo_id) || new Set();
-          arr.forEach(v => set.add(v));
-          comunicMap.set(h.processo_id, set);
-        }
       });
       rows.forEach(r => {
         r.pareceres_recebidos = Array.from(recebidosMap.get(r.id) || []);
-        r.comunicacoes_recebidas = Array.from(comunicMap.get(r.id) || []);
       });
       buildViewData();
       renderGridPreservandoScroll();
@@ -1209,10 +1175,9 @@ export default {
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
-        const totalCom = row?.comunicacoes_a_expedir?.length || 0;
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
-        $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
-        $expedir.disabled = false;
+        const usedSig = new Set([...(row?.pareceres_a_expedir || []), ...(row?.pareceres_pendentes || []), ...(row?.pareceres_recebidos || [])]);
+        $expedir.disabled = SIGADAER_OPCOES.every(p => usedSig.has(p));
         $receber.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
         $recebimento.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
         $msg.textContent = "Solicitação de parecer interno registrada.";
@@ -1222,67 +1187,48 @@ export default {
       }
     });
 
-    $comunic.addEventListener("click", async () => {
-      if (!currentRowId) { alert("Busque um processo antes de registrar necessidade de parecer externo."); return; }
+    $expedir.addEventListener("click", async () => {
+      if (!currentRowId) { alert("Busque um processo antes de registrar necessidade de SIGADAER."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
-      const pend = [...(row?.comunicacoes_pendentes || []), ...(row?.comunicacoes_a_expedir || [])];
-      const disponiveis = COMUNICACOES_OPCOES.filter(p => !pend.includes(p));
-      const escolhas = await selectParecerOptions(disponiveis, "o Parecer Externo");
-      if (!escolhas.length) return;
-      $comunic.disabled = true;
+      const used = new Set([...(row?.pareceres_a_expedir || []), ...(row?.pareceres_pendentes || []), ...(row?.pareceres_recebidos || [])]);
+      const disponiveis = SIGADAER_OPCOES.filter(p => !used.has(p));
+      const escolha = await selectParecerExpedir(disponiveis, "o Tipo para SIGADAER");
+      if (!escolha) return;
+      $expedir.disabled = true;
       try {
         await ensureSession();
-        const { error } = await supabase.rpc("request_comunicacao", { p_processo_id: currentRowId, p_orgaos: escolhas });
+        const { error } = await supabase.rpc("request_sigadaer", { p_processo_id: currentRowId, p_orgao: escolha });
         if (error) throw error;
         if (row) {
-          escolhas.forEach(o => {
-            row.comunicacoes_a_expedir = Array.from(new Set([...(row.comunicacoes_a_expedir || []), o]));
-          });
+          row.pareceres_a_expedir = Array.from(new Set([...(row.pareceres_a_expedir || []), escolha]));
         }
         const hist = await getHistorico(currentRowId);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
-        if (row) row.comunicacoes_recebidas = extractComunicacoesRecebidas(hist);
+        if (row) row.pareceres_recebidos = extractPareceresRecebidos(hist);
         const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
         histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
-        const totalCom = row?.comunicacoes_a_expedir?.length || 0;
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
-        $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
-        $expedir.disabled = false;
+        const usedSig = new Set([...(row.pareceres_a_expedir || []), ...(row.pareceres_pendentes || []), ...(row.pareceres_recebidos || [])]);
+        $expedir.disabled = SIGADAER_OPCOES.every(p => usedSig.has(p));
         $receber.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
         $recebimento.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
-        $msg.textContent = "Necessidade de parecer externo registrada.";
+        $msg.textContent = "Necessidade de SIGADAER registrada.";
       } catch (e) {
-        $msg.textContent = "Erro ao registrar necessidade de parecer externo: " + e.message;
-        $comunic.disabled = false;
+        $msg.textContent = "Erro ao registrar necessidade de SIGADAER: " + e.message;
+      } finally {
+        const usedSig2 = new Set([...(row?.pareceres_a_expedir || []), ...(row?.pareceres_pendentes || []), ...(row?.pareceres_recebidos || [])]);
+        $expedir.disabled = SIGADAER_OPCOES.every(p => usedSig2.has(p));
       }
-    });
-
-    $expedir.addEventListener("click", async () => {
-      if (!currentRowId) { alert("Busque um processo antes de registrar necessidade de SIGADAER."); return; }
-      const row = allList.find(r => String(r.id) === String(currentRowId));
-      const pendCom = row?.comunicacoes_a_expedir || [];
-      const pend = [...pendCom, ...SIGADAER_EXTRA];
-      const escolha = await selectParecerExpedir(pend, "o Tipo para SIGADAER");
-      if (!escolha) return;
-      if (row) {
-        row.comunicacoes_a_expedir = (row.comunicacoes_a_expedir || []).filter(p => p !== escolha);
-        row.pareceres_a_expedir = Array.from(new Set([...(row.pareceres_a_expedir || []), escolha]));
-      }
-      buildViewData();
-      renderGridPreservandoScroll();
-      $receber.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
-      $recebimento.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
-      $msg.textContent = "Necessidade de SIGADAER registrada.";
     });
     
     $receber.addEventListener("click", async () => {
       if (!currentRowId) { alert("Busque um processo antes de registrar expedição de SIGADAER."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
       const pend = row?.pareceres_a_expedir || [];
-      const escolha = await selectParecerExpedir([...pend, "Outro(s)"], "o Tipo para Expedir");
+      const escolha = await selectParecerExpedir(pend, "o Tipo para Expedir");
       if (!escolha) return;
       $receber.disabled = true;
       try {
@@ -1301,10 +1247,9 @@ export default {
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
-        const totalCom = row?.comunicacoes_a_expedir?.length || 0;
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
-        $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
-        $expedir.disabled = false;
+        const usedSig = new Set([...(row?.pareceres_a_expedir || []), ...(row?.pareceres_pendentes || []), ...(row?.pareceres_recebidos || [])]);
+        $expedir.disabled = SIGADAER_OPCOES.every(p => usedSig.has(p));
         $recebimento.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
         $msg.textContent = "Expedição de SIGADAER registrada.";
       } catch (e) {
@@ -1337,10 +1282,9 @@ export default {
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
-        const totalCom = row?.comunicacoes_a_expedir?.length || 0;
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
-        $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
-        $expedir.disabled = false;
+        const usedSig = new Set([...(row?.pareceres_a_expedir || []), ...(row?.pareceres_pendentes || []), ...(row?.pareceres_recebidos || [])]);
+        $expedir.disabled = SIGADAER_OPCOES.every(p => usedSig.has(p));
         $receber.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
         $msg.textContent = "Recebimento registrado.";
       } catch (e) {
