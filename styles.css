@@ -15,7 +15,12 @@ body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial
 .row > * { flex: 1; min-width: 200px; }
 label { display: block; font-size: 0.9rem; margin-bottom: 4px; }
 input, select, button { padding: 8px; font: inherit; }
-button { cursor: pointer; }
+button {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
 .table { width: 100%; border-collapse: collapse; }
 .table th, .table td { border: 1px solid #eee; padding: 8px; text-align: left; }
 .badge { display:inline-block; padding: 2px 8px; border:1px solid #ddd; border-radius:999px; font-size:12px; }
