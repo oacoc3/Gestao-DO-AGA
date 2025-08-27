@@ -35,6 +35,7 @@ const STATUS = [
   "Aprovação", "Sobrestado", "Publicação de Portaria", "Arquivado"
 ];
 const PARECER_OPCOES = ["ATM", "DT", "CGNA", "COMAE", "COMGAP", "COMPREP", "OPR AD"];
+const SIGADAER_ORGAOS = ["COMAE", "COMGAP", "COMPREP"];
 /* =========================
    Máscara / validação NUP
    ========================= */
@@ -298,6 +299,57 @@ function selectParecerRecebido(options) {
   });
 }
 
+
+function selectParecerExpedir(options) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    Object.assign(overlay.style, {
+      position: "fixed",
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: "rgba(0,0,0,0.3)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 9999,
+    });
+
+    const box = document.createElement("div");
+    Object.assign(box.style, {
+      background: "#fff",
+      padding: "12px",
+      border: "1px solid #ccc",
+      borderRadius: "4px",
+      minWidth: "200px",
+    });
+    box.innerHTML = `
+      <label>Selecione o Parecer para Expedir:</label><br/>
+      <select id="parecer-select" size="${Math.min(options.length, 5)}" style="width:100%; margin-top:4px;">
+        ${options.map(o => `<option value="${o}">${o}</option>`).join("")}
+      </select>
+      <div style="margin-top:8px; text-align:right;">
+        <button id="parecer-ok">OK</button>
+        <button id="parecer-cancel" type="button" style="margin-left:6px;">Cancelar</button>
+      </div>
+    `;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const select = box.querySelector("#parecer-select");
+    box.querySelector("#parecer-ok").addEventListener("click", () => {
+      const value = select.value;
+      document.body.removeChild(overlay);
+      resolve(value);
+    });
+    box.querySelector("#parecer-cancel").addEventListener("click", () => {
+      document.body.removeChild(overlay);
+      resolve("");
+    });
+  });
+}
+
 /* =========================
    CSS (grid, rolagens, etc.)
    ========================= */
@@ -384,6 +436,8 @@ function ensureLayoutCSS() {
     .badge-parecer{ font-size:10px; padding:1px 4px; border:1px solid transparent; }
     .badge-parecer.pendente{ background:#f8d7da; color:#721c24; border-color:#f5c6cb; }
     .badge-parecer.recebido{ background:#d4edda; color:#155724; border-color:#c3e6cb; }
+    .badge-parecer.expedir{ background:#e2e3e5; color:#383d41; border-color:#d6d8db; line-height:1.1; }
+    .badge-parecer.expedir .exp-label{ font-size:8px; display:block; }
 
     /* Histórico */
     :root{
@@ -491,6 +545,9 @@ function viewHistorico(title, hist) {
       if (h.parecer) {
         const p = Array.isArray(h.parecer) ? h.parecer.join(', ') : h.parecer;
         mudanca = `Parecer ${p} recebido`;
+      } else if (h.parecer_expedido) {
+        const p = Array.isArray(h.parecer_expedido) ? h.parecer_expedido.join(', ') : h.parecer_expedido;
+        mudanca = `Parecer ${p} expedido`;
       } else {
         const p = h.parecer_solicitado || h.orgao;
         if (p) mudanca = `Parecer ${Array.isArray(p) ? p.join(', ') : p} solicitado`;
@@ -547,6 +604,7 @@ function viewFormulario() {
       </div>
       <div class="proc-form-row">
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-parecer" disabled>Solicitar Parecer</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>Expedir SIGADAER</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Receber Parecer</button></div>
       </div>
       <div id="msg-novo" class="small" style="margin-top:6px"></div>
@@ -687,6 +745,7 @@ export default {
     const $salvar = el("#btn-salvar");
     const $excluir = el("#btn-excluir");
     const $parecer = el("#btn-parecer");
+    const $expedir = el("#btn-expedir");
     const $receber = el("#btn-receber");
     const $msg = el("#msg-novo");
     const gridWrap = el("#grid");
@@ -726,7 +785,7 @@ export default {
       if (clearNup) $nup.value = "";
       $tipo.value = ""; $entrada.value = ""; $status.value = "";
       $tipo.disabled = true; $entrada.disabled = true; $status.disabled = true;
-      $salvar.disabled = true; $excluir.disabled = true; $parecer.disabled = true; $receber.disabled = true;
+      $salvar.disabled = true; $excluir.disabled = true; $parecer.disabled = true; $expedir.disabled = true; $receber.disabled = true;
       currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
       pinnedId = null; // remove o pino ao limpar
     }
@@ -746,7 +805,7 @@ export default {
       $status.disabled = false;
 
       $salvar.disabled = false;
-     $excluir.disabled = true; $parecer.disabled = true; $receber.disabled = true;
+     $excluir.disabled = true; $parecer.disabled = true; $expedir.disabled = true; $receber.disabled = true;
 
       $msg.textContent = "Preencha os campos e clique em Salvar.";
       histPane.innerHTML = viewHistorico(`Histórico — ${nupMasked}`, []);
@@ -769,7 +828,9 @@ export default {
 
       $salvar.disabled = true;
       $excluir.disabled = false;
-      $parecer.disabled = (row.pareceres_pendentes?.length || 0) >= PARECER_OPCOES.length;
+      const totalPend = (row.pareceres_pendentes?.length || 0) + (row.pareceres_a_expedir?.length || 0);
+      $parecer.disabled = totalPend >= PARECER_OPCOES.length;
+      $expedir.disabled = !(row.pareceres_a_expedir && row.pareceres_a_expedir.length);
       $receber.disabled = !(row.pareceres_pendentes && row.pareceres_pendentes.length);
       $msg.textContent = "Processo encontrado. Altere o Status se necessário ou veja o Histórico.";
     }
@@ -800,9 +861,10 @@ export default {
           nup: displayNUP(r.nup),   // <<< garante máscara na lista
           tipo: r.tipo,
           status: r.status,
-          parecerCount: (r.pareceres_pendentes || []).length,
+          parecerCount: (r.pareceres_pendentes || []).length + (r.pareceres_a_expedir || []).length,
           parecerDisplay: (function(){
             const parts = PARECER_OPCOES.map(p => {
+              if (r.pareceres_a_expedir?.includes(p)) return `<span class="badge badge-parecer expedir">${p}<span class="exp-label">EXPEDIR</span></span>`;
               if (r.pareceres_pendentes?.includes(p)) return `<span class="badge badge-parecer pendente">${p}</span>`;
               if (r.pareceres_recebidos?.includes(p)) return `<span class="badge badge-parecer recebido">${p}</span>`;
               return "";
@@ -1055,7 +1117,7 @@ export default {
     $parecer.addEventListener("click", async () => {
       if (!currentRowId) { alert("Busque um processo antes de solicitar parecer."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
-      const pend = row?.pareceres_pendentes || [];
+      const pend = [...(row?.pareceres_pendentes || []), ...(row?.pareceres_a_expedir || [])];
       const disponiveis = PARECER_OPCOES.filter(p => !pend.includes(p));
       const escolhas = await selectParecerOptions(disponiveis);
       if (!escolhas.length) return;
@@ -1065,7 +1127,13 @@ export default {
         const { error } = await supabase.rpc("request_parecer", { p_processo_id: currentRowId, p_orgaos: escolhas });
         if (error) throw error;
         if (row) {
-          row.pareceres_pendentes = Array.from(new Set([...(row.pareceres_pendentes || []), ...escolhas]));
+          escolhas.forEach(o => {
+            if (SIGADAER_ORGAOS.includes(o)) {
+              row.pareceres_a_expedir = Array.from(new Set([...(row.pareceres_a_expedir || []), o]));
+            } else {
+              row.pareceres_pendentes = Array.from(new Set([...(row.pareceres_pendentes || []), o]));
+            }
+          });
         }
         const hist = await getHistorico(currentRowId);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
@@ -1074,15 +1142,51 @@ export default {
         histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
         renderGridPreservandoScroll();
-        $parecer.disabled = (row?.pareceres_pendentes?.length || 0) >= PARECER_OPCOES.length;
-       $receber.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
+        const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
+        $parecer.disabled = totalPend >= PARECER_OPCOES.length;
+        $expedir.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
+        $receber.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
         $msg.textContent = "Parecer solicitado.";
       } catch (e) {
         $msg.textContent = "Erro ao solicitar parecer: " + e.message;
         $parecer.disabled = false;
       }
     });
-
+    $expedir.addEventListener("click", async () => {
+      if (!currentRowId) { alert("Busque um processo antes de expedir SIGADAER."); return; }
+      const row = allList.find(r => String(r.id) === String(currentRowId));
+      const pend = row?.pareceres_a_expedir || [];
+      if (!pend.length) { alert("Não há parecer para expedir."); return; }
+      const escolha = await selectParecerExpedir(pend);
+      if (!escolha) return;
+      $expedir.disabled = true;
+      try {
+        await ensureSession();
+        const { error } = await supabase.rpc("expedir_sigadaer", { p_processo_id: currentRowId, p_orgao: escolha });
+        if (error) throw error;
+        if (row) {
+          row.pareceres_a_expedir = (row.pareceres_a_expedir || []).filter(p => p !== escolha);
+          row.pareceres_pendentes = Array.from(new Set([...(row.pareceres_pendentes || []), escolha]));
+        }
+        const hist = await getHistorico(currentRowId);
+        await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
+        if (row) row.pareceres_recebidos = extractPareceresRecebidos(hist);
+        const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
+        histPane.innerHTML = viewHistorico(titulo, hist);
+        buildViewData();
+        renderGridPreservandoScroll();
+        const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
+        $parecer.disabled = totalPend >= PARECER_OPCOES.length;
+        $expedir.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
+        $receber.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
+        $msg.textContent = "SIGADAER expedido.";
+      } catch (e) {
+        $msg.textContent = "Erro ao expedir: " + e.message;
+      } finally {
+        $expedir.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
+      }
+    });
+    
     $receber.addEventListener("click", async () => {
       if (!currentRowId) { alert("Busque um processo antes de receber parecer."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
@@ -1105,12 +1209,17 @@ export default {
         histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
         renderGridPreservandoScroll();
-        $parecer.disabled = (row?.pareceres_pendentes?.length || 0) >= PARECER_OPCOES.length;
+        const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
+        $parecer.disabled = totalPend >= PARECER_OPCOES.length;
+        $expedir.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
         $msg.textContent = "Parecer recebido.";
       } catch (e) {
         $msg.textContent = "Erro ao registrar parecer: " + e.message;
       } finally {
         $receber.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
+        const totalPend2 = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
+        $parecer.disabled = totalPend2 >= PARECER_OPCOES.length;
+        $expedir.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
       }
     });
 
