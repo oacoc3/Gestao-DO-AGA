@@ -446,6 +446,7 @@ function ensureLayoutCSS() {
     .sort-wrap { display:inline-flex; gap:2px; }
     .sort-btn { border:1px solid #ccc; background:#f7f7f7; padding:0 4px; line-height:16px; height:18px; cursor:pointer; }
     .sort-btn.active { background:#e9e9e9; font-weight:bold; }
+    .filter-select { font-size:11px; }
 
     .proc-grid-row.row-selected { outline:2px solid #999; outline-offset:-1px; }
     .badge-parecer{ font-size:10px; padding:1px 4px; border:1px solid transparent; line-height:1.1; }
@@ -516,16 +517,32 @@ function headerCell(key, labelHtml, sort) {
   `;
 }
 
+function filterHeaderCell(key, labelHtml, options, selected) {
+  return `
+    <div class="hdc">
+      <span class="title">${labelHtml}</span>
+      <select class="filter-select" data-k="${key}">
+        <option value="">Todos</option>
+        ${options.map(o => `<option value="${o}" ${selected===o?'selected':''}>${o}</option>`).join("")}
+      </select>
+    </div>
+  `;
+}
+
+function plainHeaderCell(labelHtml) {
+  return `<div class="hdc"><span class="title">${labelHtml}</span></div>`;
+}
+
 /* =========================
    VIEW: tabela de processos
    ========================= */
-function viewTabela(listView, sort) {
+function viewTabela(listView, sort, filters) {
   const header = `
     <div class="proc-grid-header">
       ${headerCell("nup","NUP",sort)}
-      ${headerCell("tipo","Tipo",sort)}
-      ${headerCell("status","Status",sort)}
-      ${headerCell("parecer","Pareceres",sort)}
+      ${filterHeaderCell("tipo","Tipo",TIPOS,filters.tipo)}
+      ${filterHeaderCell("status","Status",STATUS,filters.status)}
+      ${plainHeaderCell("Envios/Recebimentos")}
       ${headerCell("entrada","1ª Entrada<br>Regional",sort)}
       ${headerCell("prazo","Prazo<br>Regional",sort)}
     </div>
@@ -665,10 +682,17 @@ function bindTabela(container, refresh, onPickRow) {
       ev.stopPropagation();
     });
   });
-  container.querySelectorAll(".hdc .title").forEach(lbl => {
+  container.querySelectorAll(".hdc .title[data-k]").forEach(lbl => {
     lbl.addEventListener("click", () => {
       const k = lbl.getAttribute("data-k");
       container.dispatchEvent(new CustomEvent("sorttoggle", { detail: { key:k } }));
+    });
+  });
+
+  container.querySelectorAll(".filter-select").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const k = sel.getAttribute("data-k");
+      container.dispatchEvent(new CustomEvent("filterchange", { detail: { key:k, value: sel.value } }));
     });
   });
 }
@@ -792,6 +816,7 @@ export default {
     let loadingPage = false;
 
     const sort = { key:"entrada", dir:"desc" };
+    const filters = { tipo:"", status:"" };
 
     // Alturas/rolagem interna
     const resizeAll = () => applyHeights(root);
@@ -923,7 +948,10 @@ export default {
           default: return "";
         }
       };
-      const arr = viewData.slice();
+      const arr = viewData.filter(v =>
+        (!filters.tipo || v.tipo === filters.tipo) &&
+        (!filters.status || v.status === filters.status)
+      );
       arr.sort((a,b) => (val(a) > val(b) ? 1 : val(a) < val(b) ? -1 : 0) * dir);
 
       // pino vai para o topo
@@ -939,7 +967,7 @@ export default {
 
     function renderGrid() {
       const view = applySort();
-      gridWrap.innerHTML = viewTabela(view, sort);
+      gridWrap.innerHTML = viewTabela(view, sort, filters);
       bindTabela(gridWrap, refreshFirstPage, onPickRowFromList);
 
       // eventos de ordenação
@@ -952,6 +980,12 @@ export default {
         const k = ev.detail.key;
         if (sort.key === k) sort.dir = sort.dir === "asc" ? "desc" : "asc";
         else { sort.key = k; sort.dir = "asc"; }
+        renderGrid();
+      });
+
+      // filtros
+      gridWrap.addEventListener("filterchange", (ev) => {
+        filters[ev.detail.key] = ev.detail.value;
         renderGrid();
       });
 
