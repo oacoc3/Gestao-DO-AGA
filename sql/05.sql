@@ -24,10 +24,13 @@ declare
   v_email text := current_setting('request.jwt.claims', true)::json->>'email';
   begin
   update public.processos
-    set pareceres_pendentes = (
-      select array_agg(distinct unnest)
-      from unnest(coalesce(pareceres_pendentes, '{}') || coalesce(p_orgaos, '{}')) as unnest
-    )
+    set pareceres_pendentes = coalesce(
+        (
+          select array_agg(distinct unnest)
+          from unnest(coalesce(pareceres_pendentes, '{}') || coalesce(p_orgaos, '{}')) as unnest
+        ),
+        '{}'
+      )
     where id = p_processo_id;
 
   insert into public.status_history (processo_id, parecer_solicitado, changed_by, changed_by_email)
