@@ -422,10 +422,10 @@ function ensureLayoutCSS() {
     :root{
       --w-nup: 20ch;
       --w-tipo: clamp(14ch, 18ch, 24ch);
-      --w-notif: clamp(16ch, 20ch, 28ch);
+      --w-notif: clamp(10ch, 12ch, 16ch);
       --w-parecer: clamp(16ch, 20ch, 26ch);
-      --w-entrada: clamp(10ch, 12ch, 16ch);
-      --w-prazo: clamp(8ch, 10ch, 12ch);
+      --w-entrada: clamp(8ch, 10ch, 10ch);
+      --w-prazo: clamp(8ch, 10ch, 10ch);
     }
 
     #grid{ flex:1 1 auto; min-height:0; display:flex; }
@@ -508,6 +508,12 @@ function ensureLayoutCSS() {
     .hist-header{
       position: sticky; top: 0; z-index:2;
       background:#fff; border-bottom:1px solid #ddd;
+    }
+    .hist-header > div,
+    .hist-row > div{
+      text-align: center;
+      padding: 4px 6px;
+      font-size: 12px;
     }
   `;
   document.head.appendChild(style);
