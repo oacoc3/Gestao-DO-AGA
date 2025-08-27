@@ -35,7 +35,8 @@ const STATUS = [
   "Aprovação", "Sobrestado", "Publicação de Portaria", "Arquivado"
 ];
 const PARECER_OPCOES = ["ATM", "DT", "CGNA", "COMAE", "COMGAP", "COMPREP", "OPR AD"];
-const SIGADAER_ORGAOS = ["COMAE", "COMGAP", "COMPREP"];
+// >>> Patch: inclui "OPR AD" como órgão SIGADAER
+const SIGADAER_ORGAOS = ["COMAE", "COMGAP", "COMPREP", "OPR AD"];
 const COMUNICACOES_OPCOES = ["ANAC", "GABAER", "Prefeitura", "JJAER"];
 /* =========================
    Máscara / validação NUP
@@ -449,9 +450,10 @@ function ensureLayoutCSS() {
     .proc-grid-row.row-selected { outline:2px solid #999; outline-offset:-1px; }
     .badge-parecer{ font-size:10px; padding:1px 4px; border:1px solid transparent; line-height:1.1; }
     .badge-parecer .sub{ font-size:8px; display:block; }
-    .badge-parecer.pendente{ background:#f8d7da; color:#721c24; border-color:#f5c6cb; }
+    /* >>> Patch: troca as cores das badges para pendente/expedir */
+    .badge-parecer.pendente{ background:#fff3cd; color:#856404; border-color:#ffeeba; }
     .badge-parecer.recebido{ background:#d4edda; color:#155724; border-color:#c3e6cb; }
-    .badge-parecer.expedir{ background:#e2e3e5; color:#383d41; border-color:#d6d8db; }
+    .badge-parecer.expedir{ background:#f8d7da; color:#721c24; border-color:#f5c6cb; }
 
     /* Histórico */
     :root{
@@ -621,7 +623,8 @@ function viewFormulario() {
       <div class="proc-form-row">
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-parecer" disabled>Parecer(es) Necessário(s)</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-comunic" disabled>Comunicação(ões) Necessária(s)</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>Expedir SIGADAER</button></div>
+        <!-- >>> Patch: texto do botão alterado -->
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>SIGADAER Expedido(s)</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Recebimentos</button></div>
       </div>
       <div id="msg-novo" class="small" style="margin-top:6px"></div>
@@ -644,7 +647,7 @@ function bindTabela(container, refresh, onPickRow) {
         row.classList.add("row-selected");
         const hist = await getHistorico(id);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
-         const pane = document.getElementById("hist-pane");
+        const pane = document.getElementById("hist-pane");
         pane.innerHTML = viewHistorico(`Histórico — ${nupMasked}`, hist);
       } catch (e) {
         alert("Erro ao carregar histórico: " + e.message);
@@ -823,7 +826,7 @@ export default {
       $status.disabled = false;
 
       $salvar.disabled = false;
-     $excluir.disabled = true; $parecer.disabled = true; $comunic.disabled = true; $expedir.disabled = true; $receber.disabled = true;
+      $excluir.disabled = true; $parecer.disabled = true; $comunic.disabled = true; $expedir.disabled = true; $receber.disabled = true;
 
       $msg.textContent = "Preencha os campos e clique em Salvar.";
       histPane.innerHTML = viewHistorico(`Histórico — ${nupMasked}`, []);
@@ -885,7 +888,11 @@ export default {
           parecerDisplay: (function(){
             const parts = PARECER_OPCOES.map(p => {
               if (r.pareceres_a_expedir?.includes(p)) return `<span class="badge badge-parecer expedir">${p}<span class="sub">EXPEDIR</span></span>`;
-              if (r.pareceres_pendentes?.includes(p)) return `<span class="badge badge-parecer pendente">${p}<span class="sub">SOLICITADO</span></span>`;
+              // >>> Patch: pendente mostra "EXPEDIDO" para órgãos SIGADAER, senão "SOLICITADO"
+              if (r.pareceres_pendentes?.includes(p)) {
+                const sub = SIGADAER_ORGAOS.includes(p) ? "EXPEDIDO" : "SOLICITADO";
+                return `<span class="badge badge-parecer pendente">${p}<span class="sub">${sub}</span></span>`;
+              }
               if (r.pareceres_recebidos?.includes(p)) return `<span class="badge badge-parecer recebido">${p}<span class="sub">RECEBIDO</span></span>`;
               return "";
             }).filter(Boolean);
@@ -895,7 +902,11 @@ export default {
           comunicacaoDisplay: (function(){
             const parts = COMUNICACOES_OPCOES.map(p => {
               if (r.comunicacoes_a_expedir?.includes(p)) return `<span class="badge badge-parecer expedir">${p}<span class="sub">EXPEDIR</span></span>`;
-              if (r.comunicacoes_pendentes?.includes(p)) return `<span class="badge badge-parecer pendente">${p}<span class="sub">EXPEDIDO</span></span>`;
+              // >>> Patch: pendente vira "recebido" visual para ANAC/Prefeitura/JJAER; rótulo "EXPEDIDO"
+              if (r.comunicacoes_pendentes?.includes(p)) {
+                const cls = ["ANAC", "Prefeitura", "JJAER"].includes(p) ? "recebido" : "pendente";
+                return `<span class="badge badge-parecer ${cls}">${p}<span class="sub">EXPEDIDO</span></span>`;
+              }
               if (r.comunicacoes_recebidas?.includes(p)) return `<span class="badge badge-parecer recebido">${p}<span class="sub">RECEBIDO</span></span>`;
               return "";
             }).filter(Boolean);
@@ -1036,7 +1047,7 @@ export default {
       });
       rows.forEach(r => {
         r.pareceres_recebidos = Array.from(recebidosMap.get(r.id) || []);
-         r.comunicacoes_recebidas = Array.from(comunicMap.get(r.id) || []);
+        r.comunicacoes_recebidas = Array.from(comunicMap.get(r.id) || []);
       });
       buildViewData();
       renderGridPreservandoScroll();
@@ -1184,7 +1195,7 @@ export default {
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
-           const totalCom = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
+        const totalCom = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
         $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
         $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
@@ -1224,16 +1235,18 @@ export default {
         const totalCom = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
         $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
-        $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
-        $receber.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || (row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
+        $expedir.disabled = !((row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length) || (row?.pareceres_a_expedir && row.pareceres_a_expedir.length));
+        $receber.disabled = !((row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length) || (row?.pareceres_pendentes && row.pareceres_pendentes.length));
         $msg.textContent = "Comunicação registrada.";
       } catch (e) {
         $msg.textContent = "Erro ao registrar comunicação: " + e.message;
         $comunic.disabled = false;
       }
     });
+
     $expedir.addEventListener("click", async () => {
-      if (!currentRowId) { alert("Busque um processo antes de expedir SIGADAER."); return; }
+      // >>> Patch: mensagem mais clara
+      if (!currentRowId) { alert("Busque um processo antes de registrar SIGADAER Expedido(s)."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
       const pendParecer = row?.pareceres_a_expedir || [];
       const pendCom = row?.comunicacoes_a_expedir || [];
@@ -1270,12 +1283,13 @@ export default {
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
-           const totalCom = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
+        const totalCom = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
         $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
         $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
         $receber.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || (row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
-        $msg.textContent = "SIGADAER expedido.";
+        // >>> Patch: texto de confirmação atualizado
+        $msg.textContent = "SIGADAER registrado como expedido.";
       } catch (e) {
         $msg.textContent = "Erro ao expedir: " + e.message;
       } finally {
@@ -1319,7 +1333,7 @@ export default {
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
-         const totalCom = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
+        const totalCom = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
         $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
         $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
@@ -1327,9 +1341,9 @@ export default {
       } catch (e) {
         $msg.textContent = "Erro ao registrar recebimento: " + e.message;
       } finally {
-            $receber.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || (row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
+        $receber.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || (row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
         const totalPend2 = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
-          const totalCom2 = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
+        const totalCom2 = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
         $parecer.disabled = totalPend2 >= PARECER_OPCOES.length;
         $comunic.disabled = totalCom2 >= COMUNICACOES_OPCOES.length;
         $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
