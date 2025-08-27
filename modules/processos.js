@@ -63,8 +63,8 @@ const NOTIFICACAO_OPCOES = [
 const ALL_PARECERES = Array.from(new Set([
   ...PARECER_OPCOES,
   ...SIGADAER_OPCOES,
-  ...NOTIFICACAO_OPCOES,
 ]));
+
 /* =========================
    Máscara / validação NUP
    ========================= */
@@ -149,7 +149,7 @@ async function deleteProcesso(id) {
   return true;
 }
 async function getHistorico(processoId) {
- await ensureSession();
+  await ensureSession();
   const { data, error } = await supabase
     .from("status_history")
     .select("*")
@@ -221,6 +221,17 @@ function extractPareceresRecebidos(hist = []) {
     if (!p) continue;
     if (Array.isArray(p)) p.forEach(v => set.add(v));
     else set.add(p);
+  }
+  return Array.from(set);
+}
+
+function extractComunicacoesCientes(hist = []) {
+  const set = new Set();
+  for (const h of hist) {
+    const c = h.comunicacao;
+    if (!c) continue;
+    if (Array.isArray(c)) c.forEach(v => set.add(v));
+    else set.add(c);
   }
   return Array.from(set);
 }
@@ -411,6 +422,7 @@ function ensureLayoutCSS() {
     :root{
       --w-nup: 20ch;
       --w-tipo: clamp(14ch, 18ch, 24ch);
+      --w-notif: clamp(8ch, 10ch, 12ch);
       --w-parecer: clamp(16ch, 20ch, 26ch);
       --w-entrada: clamp(10ch, 12ch, 16ch);
       --w-prazo: clamp(8ch, 10ch, 12ch);
@@ -426,6 +438,7 @@ function ensureLayoutCSS() {
         var(--w-nup)
         var(--w-tipo)
         minmax(0, 1.4fr)
+        var(--w-notif)
         var(--w-parecer)
         var(--w-entrada)
         var(--w-prazo);
@@ -445,7 +458,8 @@ function ensureLayoutCSS() {
       padding: 4px 6px;
       font-size: 12px;
     }
-    .proc-grid-row > div:nth-child(4){
+    .proc-grid-row > div:nth-child(4),
+    .proc-grid-row > div:nth-child(5){
       white-space: normal;
       overflow: visible;
       text-overflow: unset;
@@ -469,6 +483,10 @@ function ensureLayoutCSS() {
     .badge-parecer.pendente{ background:#fff3cd; color:#856404; border-color:#ffeeba; }
     .badge-parecer.recebido{ background:#d4edda; color:#155724; border-color:#c3e6cb; }
     .badge-parecer.expedir{ background:#f8d7da; color:#721c24; border-color:#f5c6cb; }
+    .badge-notif{ font-size:14px; padding:1px 4px; border:1px solid transparent; line-height:1.1; }
+    .badge-notif .sub{ font-size:8px; display:block; }
+    .badge-notif.pendente{ background:#fff3cd; color:#856404; border-color:#ffeeba; }
+    .badge-notif.recebido{ background:#d4edda; color:#155724; border-color:#c3e6cb; }
 
     /* Histórico */
     :root{
@@ -556,6 +574,7 @@ function viewTabela(listView, sort, filters) {
       ${headerCell("nup","NUP",sort)}
       ${filterHeaderCell("tipo","Tipo",TIPOS,filters.tipo)}
       ${filterHeaderCell("status","Status",STATUS,filters.status)}
+      ${plainHeaderCell("Notificações")}
       ${plainHeaderCell("Envios/Recebimentos")}
       ${headerCell("entrada","1ª Entrada<br>Regional",sort)}
       ${headerCell("prazo","Prazo<br>Regional",sort)}
@@ -566,6 +585,7 @@ function viewTabela(listView, sort, filters) {
       <div>${v.nup}</div>
       <div>${v.tipo}</div>
       <div>${v.status}</div>
+      <div>${v.notificacaoDisplay}</div>
       <div>${v.parecerDisplay}</div>
       <div>${v.entrada || ""}</div>
       <div>${v.prazoDisplay}</div>
@@ -653,13 +673,13 @@ function viewFormulario() {
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-excluir" disabled>Excluir</button></div>
       </div>
       <div class="proc-form-row">
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-parecer" disabled>Registrar Solicitação de Parecer Interno</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-parecer" disabled>Parecer Interno</button></div>
         <!-- >>> Patch: adiciona botões de expedição e recebimento -->
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>Registrar Necessidade de SIGADAER</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Registrar Expedição de SIGADAER</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-recebimento" disabled>Registrar Recebimento</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-envio-notificacao" disabled>Registrar Envio de Notificação</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-ciencia-notificacao" disabled>Registrar Ciência de Notificação</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>Nec. SIGADAER</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Exp. SIGADAER</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-recebimento" disabled>Recebimento</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-envio-notificacao" disabled>Envio Notificação</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-ciencia-notificacao" disabled>Ciência Notificação</button></div>
       </div>
       <div id="msg-novo" class="small" style="margin-top:6px"></div>
     </div>
@@ -901,7 +921,8 @@ export default {
       $receber.disabled = !(row.pareceres_a_expedir && row.pareceres_a_expedir.length);
       $recebimento.disabled = !(row.pareceres_pendentes && row.pareceres_pendentes.length);
       const notifPend = row.comunicacoes_pendentes || [];
-      $envioNotif.disabled = notifPend.length >= NOTIFICACAO_OPCOES.length;
+      const notifCientes = row.comunicacoes_cientes || [];
+      $envioNotif.disabled = (notifPend.length + notifCientes.length) >= NOTIFICACAO_OPCOES.length;
       $cienciaNotif.disabled = !(notifPend && notifPend.length);
       $msg.textContent = "Processo encontrado. Altere o Status se necessário ou veja o Histórico.";
     }
@@ -932,7 +953,21 @@ export default {
           nup: displayNUP(r.nup),   // <<< garante máscara na lista
           tipo: r.tipo,
           status: r.status,
-          parecerCount: (r.pareceres_pendentes || []).length + (r.pareceres_a_expedir || []).length + (r.comunicacoes_pendentes || []).length,
+          notificacaoDisplay: (function(){
+            const pend = r.comunicacoes_pendentes || [];
+            const cientes = r.comunicacoes_cientes || [];
+            const parts = NOTIFICACAO_OPCOES.map(p => {
+              if (pend.includes(p)) {
+                return `<span class="badge badge-notif pendente">&#9888;<span class="sub">ENVIADA</span></span>`;
+              }
+              if (cientes.includes(p)) {
+                return `<span class="badge badge-notif recebido">&#9989;<span class="sub">CIENTE</span></span>`;
+              }
+              return "";
+            }).filter(Boolean);
+            return parts.length ? parts.join("") : '-';
+          })(),
+          parecerCount: (r.pareceres_pendentes || []).length + (r.pareceres_a_expedir || []).length,
           parecerDisplay: (function(){
             const parts = ALL_PARECERES.map(p => {
               if (r.pareceres_a_expedir?.includes(p)) {
@@ -944,9 +979,6 @@ export default {
               }
               if (r.pareceres_recebidos?.includes(p)) {
                 return `<span class="badge badge-parecer recebido">${p}<span class="sub">RECEBIDO</span></span>`;
-              }
-              if (r.comunicacoes_pendentes?.includes(p)) {
-                return `<span class="badge badge-parecer pendente">${p}<span class="sub">ENVIADA</span></span>`;
               }
               return "";
             }).filter(Boolean);
@@ -994,25 +1026,6 @@ export default {
       gridWrap.innerHTML = viewTabela(view, sort, filters);
       bindTabela(gridWrap, refreshFirstPage, onPickRowFromList);
 
-      // eventos de ordenação
-      gridWrap.addEventListener("sortchange", (ev) => {
-        sort.key = ev.detail.key;
-        sort.dir = ev.detail.dir;
-        renderGrid();
-      });
-      gridWrap.addEventListener("sorttoggle", (ev) => {
-        const k = ev.detail.key;
-        if (sort.key === k) sort.dir = sort.dir === "asc" ? "desc" : "asc";
-        else { sort.key = k; sort.dir = "asc"; }
-        renderGrid();
-      });
-
-      // filtros
-      gridWrap.addEventListener("filterchange", (ev) => {
-        filters[ev.detail.key] = ev.detail.value;
-        renderGrid();
-      });
-
       // liga o infinite scroll
       attachInfiniteScroll();
       // mantém linha selecionada (se houver)
@@ -1031,6 +1044,23 @@ export default {
       if (sc2) sc2.scrollTop = st;
     }
 
+    // eventos de ordenação e filtros (apenas uma vez)
+    gridWrap.addEventListener("sortchange", (ev) => {
+      sort.key = ev.detail.key;
+      sort.dir = ev.detail.dir;
+      renderGrid();
+    });
+    gridWrap.addEventListener("sorttoggle", (ev) => {
+      const k = ev.detail.key;
+      if (sort.key === k) sort.dir = sort.dir === "asc" ? "desc" : "asc";
+      else { sort.key = k; sort.dir = "asc"; }
+      renderGrid();
+    });
+    gridWrap.addEventListener("filterchange", (ev) => {
+      filters[ev.detail.key] = ev.detail.value;
+      renderGrid();
+    });
+
     function onPickRowFromList(id) {
       const row = allList.find(r => String(r.id) === String(id));
       if (!row) return;
@@ -1047,6 +1077,7 @@ export default {
         const hist = await getHistorico(row.id);
         const prazo = calcularPrazoUnit(row, hist);
         row.pareceres_recebidos = extractPareceresRecebidos(hist);
+        row.comunicacoes_cientes = extractComunicacoesCientes(hist);
         prazosMap.set(row.id, prazo);
         buildViewData();
       }
@@ -1077,6 +1108,7 @@ export default {
       const prazosSub = calcularPrazosMapa(rows, historicos);
       prazosSub.forEach((v, k) => prazosMap.set(k, v));
       const recebidosMap = new Map();
+      const cientesMap = new Map();
       historicos.forEach(h => {
         if (h.parecer) {
           const arr = Array.isArray(h.parecer) ? h.parecer : [h.parecer];
@@ -1084,9 +1116,16 @@ export default {
           arr.forEach(v => set.add(v));
           recebidosMap.set(h.processo_id, set);
         }
+        if (h.comunicacao) {
+          const arr = Array.isArray(h.comunicacao) ? h.comunicacao : [h.comunicacao];
+          const setC = cientesMap.get(h.processo_id) || new Set();
+          arr.forEach(v => setC.add(v));
+          cientesMap.set(h.processo_id, setC);
+        }
       });
       rows.forEach(r => {
         r.pareceres_recebidos = Array.from(recebidosMap.get(r.id) || []);
+        r.comunicacoes_cientes = Array.from(cientesMap.get(r.id) || []);
       });
       buildViewData();
       renderGridPreservandoScroll();
@@ -1228,7 +1267,10 @@ export default {
         }
         const hist = await getHistorico(currentRowId);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
-        if (row) row.pareceres_recebidos = extractPareceresRecebidos(hist);
+        if (row) {
+          row.pareceres_recebidos = extractPareceresRecebidos(hist);
+          row.comunicacoes_cientes = extractComunicacoesCientes(hist);
+        }
         const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
         histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
@@ -1263,7 +1305,10 @@ export default {
         }
         const hist = await getHistorico(currentRowId);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
-        if (row) row.pareceres_recebidos = extractPareceresRecebidos(hist);
+        if (row) {
+          row.pareceres_recebidos = extractPareceresRecebidos(hist);
+          row.comunicacoes_cientes = extractComunicacoesCientes(hist);
+        }
         const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
         histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
@@ -1300,7 +1345,10 @@ export default {
         }
         const hist = await getHistorico(currentRowId);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
-        if (row) row.pareceres_recebidos = extractPareceresRecebidos(hist);
+        if (row) {
+          row.pareceres_recebidos = extractPareceresRecebidos(hist);
+          row.comunicacoes_cientes = extractComunicacoesCientes(hist);
+        }
         const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
         histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
@@ -1335,7 +1383,10 @@ export default {
         }
         const hist = await getHistorico(currentRowId);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
-        if (row) row.pareceres_recebidos = extractPareceresRecebidos(hist);
+        if (row) {
+          row.pareceres_recebidos = extractPareceresRecebidos(hist);
+          row.comunicacoes_cientes = extractComunicacoesCientes(hist);
+        }
         const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
         histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
@@ -1357,7 +1408,8 @@ export default {
       if (!currentRowId) { alert("Busque um processo antes de registrar envio de notificação."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
       const pend = row?.comunicacoes_pendentes || [];
-      const disponiveis = NOTIFICACAO_OPCOES.filter(p => !pend.includes(p));
+      const cientes = row?.comunicacoes_cientes || [];
+      const disponiveis = NOTIFICACAO_OPCOES.filter(p => !pend.includes(p) && !cientes.includes(p));
       const escolha = await selectParecerExpedir(disponiveis, "a Notificação");
       if (!escolha) return;
       $envioNotif.disabled = true;
@@ -1369,6 +1421,10 @@ export default {
         if (e2) throw e2;
         if (row) {
           row.comunicacoes_pendentes = Array.from(new Set([...(row.comunicacoes_pendentes || []), escolha]));
+          // Remove de cientes caso reenviado
+          if (row.comunicacoes_cientes) {
+            row.comunicacoes_cientes = row.comunicacoes_cientes.filter(p => p !== escolha);
+          }
         }
         const hist = await getHistorico(currentRowId);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
@@ -1381,7 +1437,8 @@ export default {
         $msg.textContent = "Erro ao registrar envio de notificação: " + e.message;
       } finally {
         const pendAtual = row?.comunicacoes_pendentes || [];
-        $envioNotif.disabled = pendAtual.length >= NOTIFICACAO_OPCOES.length;
+        const cientesAtual = row?.comunicacoes_cientes || [];
+        $envioNotif.disabled = (pendAtual.length + cientesAtual.length) >= NOTIFICACAO_OPCOES.length;
         $cienciaNotif.disabled = !(pendAtual.length);
       }
     });
@@ -1400,6 +1457,7 @@ export default {
         if (error) throw error;
         if (row) {
           row.comunicacoes_pendentes = (row.comunicacoes_pendentes || []).filter(p => p !== escolha);
+          row.comunicacoes_cientes = Array.from(new Set([...(row.comunicacoes_cientes || []), escolha]));
         }
         const hist = await getHistorico(currentRowId);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
@@ -1412,7 +1470,8 @@ export default {
         $msg.textContent = "Erro ao registrar ciência de notificação: " + e.message;
       } finally {
         const pendAtual = row?.comunicacoes_pendentes || [];
-        $envioNotif.disabled = pendAtual.length >= NOTIFICACAO_OPCOES.length;
+        const cientesAtual = row?.comunicacoes_cientes || [];
+        $envioNotif.disabled = (pendAtual.length + cientesAtual.length) >= NOTIFICACAO_OPCOES.length;
         $cienciaNotif.disabled = !(pendAtual.length);
       }
     });
