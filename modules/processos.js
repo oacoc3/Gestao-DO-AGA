@@ -34,10 +34,14 @@ const STATUS = [
   "Análise Técnica", "Análise GABAER", "Confecção de Doc.", "Revisão OACO",
   "Aprovação", "Sobrestado", "Publicação de Portaria", "Arquivado"
 ];
-const PARECER_OPCOES = ["ATM", "DT", "CGNA", "COMAE", "COMGAP", "COMPREP", "OPR AD"];
-// >>> Patch: inclui "OPR AD" como órgão SIGADAER
-const SIGADAER_ORGAOS = ["COMAE", "COMGAP", "COMPREP", "OPR AD"];
-const COMUNICACOES_OPCOES = ["ANAC", "GABAER", "Prefeitura", "JJAER"];
+// Opções de parecer interno
+const PARECER_OPCOES = ["ATM", "DT", "CGNA"];
+// Nenhum órgão interno gera necessidade automática de SIGADAER
+const SIGADAER_ORGAOS = [];
+// Opções de parecer externo
+const COMUNICACOES_OPCOES = ["COMGAP", "COMAE", "COMPREP", "OPR AD"];
+// Órgãos adicionais para necessidade de SIGADAER
+const SIGADAER_EXTRA = ["ANAC", "Prefeitura(s)", "JJAER", "AGU", "SAC", "GABAER"];
 /* =========================
    Máscara / validação NUP
    ========================= */
@@ -623,9 +627,10 @@ function viewFormulario() {
       <div class="proc-form-row">
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-parecer" disabled>Registrar Solicitação de Parecer Interno</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-comunic" disabled>Registrar Necessidade de Parecer Externo</button></div>
-        <!-- >>> Patch: texto do botão alterado -->
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>Registra Necessidade de SIGADAER</button></div>
+        <!-- >>> Patch: adiciona botões de expedição e recebimento -->
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>Registrar Necessidade de SIGADAER</button></div>
         <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Registrar Expedição de SIGADAER</button></div>
+        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-recebimento" disabled>Registra Recebimento</button></div>
       </div>
       <div id="msg-novo" class="small" style="margin-top:6px"></div>
     </div>
@@ -768,6 +773,7 @@ export default {
     const $comunic = el("#btn-comunic");
     const $expedir = el("#btn-expedir");
     const $receber = el("#btn-receber");
+    const $recebimento = el("#btn-recebimento");
     const $msg = el("#msg-novo");
     const gridWrap = el("#grid");
     const histPane = el("#hist-pane");
@@ -806,7 +812,7 @@ export default {
       if (clearNup) $nup.value = "";
       $tipo.value = ""; $entrada.value = ""; $status.value = "";
       $tipo.disabled = true; $entrada.disabled = true; $status.disabled = true;
-      $salvar.disabled = true; $excluir.disabled = true; $parecer.disabled = true; $comunic.disabled = true; $expedir.disabled = true; $receber.disabled = true;
+      $salvar.disabled = true; $excluir.disabled = true; $parecer.disabled = true; $comunic.disabled = true; $expedir.disabled = true; $receber.disabled = true; $recebimento.disabled = true;
       currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
       pinnedId = null; // remove o pino ao limpar
     }
@@ -850,11 +856,12 @@ export default {
       $salvar.disabled = true;
       $excluir.disabled = false;
       const totalPend = (row.pareceres_pendentes?.length || 0) + (row.pareceres_a_expedir?.length || 0);
-      const totalCom = (row.comunicacoes_pendentes?.length || 0) + (row.comunicacoes_a_expedir?.length || 0);
+      const totalCom = row.comunicacoes_a_expedir?.length || 0;
       $parecer.disabled = totalPend >= PARECER_OPCOES.length;
       $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
-      $expedir.disabled = !((row.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
-      $receber.disabled = !((row.pareceres_pendentes && row.pareceres_pendentes.length) || (row.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
+      $expedir.disabled = false;
+      $receber.disabled = !(row.pareceres_a_expedir && row.pareceres_a_expedir.length);
+      $recebimento.disabled = !(row.pareceres_pendentes && row.pareceres_pendentes.length);
       $msg.textContent = "Processo encontrado. Altere o Status se necessário ou veja o Histórico.";
     }
     function perguntaCriar(on) {
@@ -1195,11 +1202,12 @@ export default {
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
-        const totalCom = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
+        const totalCom = row?.comunicacoes_a_expedir?.length || 0;
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
         $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
-        $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
-        $receber.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || (row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
+        $expedir.disabled = false;
+        $receber.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
+        $recebimento.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
         $msg.textContent = "Solicitação de parecer interno registrada.";
       } catch (e) {
         $msg.textContent = "Erro ao registrar solicitação de parecer interno: " + e.message;
@@ -1232,11 +1240,12 @@ export default {
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
-        const totalCom = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
+        const totalCom = row?.comunicacoes_a_expedir?.length || 0;
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
         $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
-        $expedir.disabled = !((row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length) || (row?.pareceres_a_expedir && row.pareceres_a_expedir.length));
-        $receber.disabled = !((row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length) || (row?.pareceres_pendentes && row.pareceres_pendentes.length));
+        $expedir.disabled = false;
+        $receber.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
+        $recebimento.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
         $msg.textContent = "Necessidade de parecer externo registrada.";
       } catch (e) {
         $msg.textContent = "Erro ao registrar necessidade de parecer externo: " + e.message;
@@ -1245,108 +1254,92 @@ export default {
     });
 
     $expedir.addEventListener("click", async () => {
-      // >>> Patch: mensagem mais clara
       if (!currentRowId) { alert("Busque um processo antes de registrar necessidade de SIGADAER."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
-      const pendParecer = row?.pareceres_a_expedir || [];
       const pendCom = row?.comunicacoes_a_expedir || [];
-      const pend = [...pendParecer, ...pendCom];
-      if (!pend.length) { alert("Não há itens para expedir."); return; }
-      const escolha = await selectParecerExpedir(pend, "o Tipo para Expedir");
+      const pend = [...pendCom, ...SIGADAER_EXTRA];
+      const escolha = await selectParecerExpedir(pend, "o Tipo para SIGADAER");
       if (!escolha) return;
-      $expedir.disabled = true;
-      try {
-        await ensureSession();
-        if (COMUNICACOES_OPCOES.includes(escolha)) {
-          const { error } = await supabase.rpc("expedir_comunicacao", { p_processo_id: currentRowId, p_orgao: escolha });
-          if (error) throw error;
-          if (row) {
-            row.comunicacoes_a_expedir = (row.comunicacoes_a_expedir || []).filter(p => p !== escolha);
-            row.comunicacoes_pendentes = Array.from(new Set([...(row.comunicacoes_pendentes || []), escolha]));
-          }
-        } else {
-          const { error } = await supabase.rpc("expedir_sigadaer", { p_processo_id: currentRowId, p_orgao: escolha });
-          if (error) throw error;
-          if (row) {
-            row.pareceres_a_expedir = (row.pareceres_a_expedir || []).filter(p => p !== escolha);
-            row.pareceres_pendentes = Array.from(new Set([...(row.pareceres_pendentes || []), escolha]));
-          }
-        }
-        const hist = await getHistorico(currentRowId);
-        await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
-        if (row) {
-          row.pareceres_recebidos = extractPareceresRecebidos(hist);
-          row.comunicacoes_recebidas = extractComunicacoesRecebidas(hist);
-        }
-        const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
-        histPane.innerHTML = viewHistorico(titulo, hist);
-        buildViewData();
-        renderGridPreservandoScroll();
-        const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
-        const totalCom = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
-        $parecer.disabled = totalPend >= PARECER_OPCOES.length;
-        $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
-        $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
-        $receber.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || (row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
-        // >>> Patch: texto de confirmação atualizado
-        $msg.textContent = "Necessidade de SIGADAER registrada.";
-      } catch (e) {
-        $msg.textContent = "Erro ao registrar necessidade de SIGADAER: " + e.message;
-      } finally {
-        $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
+      if (row) {
+        row.comunicacoes_a_expedir = (row.comunicacoes_a_expedir || []).filter(p => p !== escolha);
+        row.pareceres_a_expedir = Array.from(new Set([...(row.pareceres_a_expedir || []), escolha]));
       }
+      buildViewData();
+      renderGridPreservandoScroll();
+      $receber.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
+      $recebimento.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
+      $msg.textContent = "Necessidade de SIGADAER registrada.";
     });
     
     $receber.addEventListener("click", async () => {
       if (!currentRowId) { alert("Busque um processo antes de registrar expedição de SIGADAER."); return; }
       const row = allList.find(r => String(r.id) === String(currentRowId));
-      const pendParecer = row?.pareceres_pendentes || [];
-      const pendCom = row?.comunicacoes_pendentes || [];
-      const pend = [...pendParecer, ...pendCom];
-      if (!pend.length) { alert("Não há itens pendentes."); return; }
-      const escolha = await selectParecerRecebido(pend, "o Tipo");
+      const pend = row?.pareceres_a_expedir || [];
+      const escolha = await selectParecerExpedir([...pend, "Outro(s)"], "o Tipo para Expedir");
       if (!escolha) return;
       $receber.disabled = true;
       try {
         await ensureSession();
-        if (COMUNICACOES_OPCOES.includes(escolha)) {
-          const { error } = await supabase.rpc("receive_comunicacao", { p_processo_id: currentRowId, p_orgao: escolha });
-          if (error) throw error;
-          if (row) {
-            row.comunicacoes_pendentes = (row.comunicacoes_pendentes || []).filter(p => p !== escolha);
-          }
-        } else {
-          const { error } = await supabase.rpc("receive_parecer", { p_processo_id: currentRowId, p_orgao: escolha });
-          if (error) throw error;
-          if (row) {
-            row.pareceres_pendentes = (row.pareceres_pendentes || []).filter(p => p !== escolha);
-          }
+        const { error } = await supabase.rpc("expedir_sigadaer", { p_processo_id: currentRowId, p_orgao: escolha });
+        if (error) throw error;
+        if (row) {
+          row.pareceres_a_expedir = (row.pareceres_a_expedir || []).filter(p => p !== escolha);
+          row.pareceres_pendentes = Array.from(new Set([...(row.pareceres_pendentes || []), escolha]));
         }
         const hist = await getHistorico(currentRowId);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
-        if (row) {
-          row.pareceres_recebidos = extractPareceresRecebidos(hist);
-          row.comunicacoes_recebidas = extractComunicacoesRecebidas(hist);
-        }
+        if (row) row.pareceres_recebidos = extractPareceresRecebidos(hist);
         const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
         histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
-        const totalCom = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
+        const totalCom = row?.comunicacoes_a_expedir?.length || 0;
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
         $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
-        $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
+        $expedir.disabled = false;
+        $recebimento.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
         $msg.textContent = "Expedição de SIGADAER registrada.";
       } catch (e) {
         $msg.textContent = "Erro ao registrar expedição de SIGADAER: " + e.message;
       } finally {
-        $receber.disabled = !((row?.pareceres_pendentes && row.pareceres_pendentes.length) || (row?.comunicacoes_pendentes && row.comunicacoes_pendentes.length));
-        const totalPend2 = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
-        const totalCom2 = (row?.comunicacoes_pendentes?.length || 0) + (row?.comunicacoes_a_expedir?.length || 0);
-        $parecer.disabled = totalPend2 >= PARECER_OPCOES.length;
-        $comunic.disabled = totalCom2 >= COMUNICACOES_OPCOES.length;
-        $expedir.disabled = !((row?.pareceres_a_expedir && row.pareceres_a_expedir.length) || (row?.comunicacoes_a_expedir && row.comunicacoes_a_expedir.length));
+        $receber.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
+      }
+    });
+
+    $recebimento.addEventListener("click", async () => {
+      if (!currentRowId) { alert("Busque um processo antes de registrar recebimento."); return; }
+      const row = allList.find(r => String(r.id) === String(currentRowId));
+      const pend = row?.pareceres_pendentes || [];
+      if (!pend.length) { alert("Não há itens pendentes."); return; }
+      const escolha = await selectParecerRecebido(pend, "o Tipo");
+      if (!escolha) return;
+      $recebimento.disabled = true;
+      try {
+        await ensureSession();
+        const { error } = await supabase.rpc("receive_parecer", { p_processo_id: currentRowId, p_orgao: escolha });
+        if (error) throw error;
+        if (row) {
+          row.pareceres_pendentes = (row.pareceres_pendentes || []).filter(p => p !== escolha);
+        }
+        const hist = await getHistorico(currentRowId);
+        await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
+        if (row) row.pareceres_recebidos = extractPareceresRecebidos(hist);
+        const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
+        histPane.innerHTML = viewHistorico(titulo, hist);
+        buildViewData();
+        renderGridPreservandoScroll();
+        const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
+        const totalCom = row?.comunicacoes_a_expedir?.length || 0;
+        $parecer.disabled = totalPend >= PARECER_OPCOES.length;
+        $comunic.disabled = totalCom >= COMUNICACOES_OPCOES.length;
+        $expedir.disabled = false;
+        $receber.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
+        $msg.textContent = "Recebimento registrado.";
+      } catch (e) {
+        $msg.textContent = "Erro ao registrar recebimento: " + e.message;
+      } finally {
+        $recebimento.disabled = !(row?.pareceres_pendentes && row.pareceres_pendentes.length);
       }
     });
 
