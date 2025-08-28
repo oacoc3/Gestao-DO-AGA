@@ -167,6 +167,7 @@ function ensureLayoutCSS() {
       flex-direction:column;
       justify-content:center;
       align-items:center;
+      border:none;
     }
   `;
   document.head.appendChild(style);
