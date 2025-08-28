@@ -97,6 +97,45 @@ async function fetchPareceres(tipo) {
   });
 }
 
+async function fetchComunicacoes(tipo, prazoDias) {
+  await ensureSession();
+  const { data: processos, error } = await supabase
+    .from("processos")
+    .select("id, nup")
+    .contains("comunicacoes_pendentes", [tipo]);
+  if (error) throw error;
+
+  const ids = processos.map((p) => p.id);
+  let historicos = [];
+  if (ids.length) {
+    const { data: hist, error: e2 } = await supabase
+      .from("status_history")
+      .select("processo_id, changed_at")
+      .contains("comunicacao_expedida", [tipo])
+      .in("processo_id", ids)
+      .order("changed_at", { ascending: false });
+    if (e2) throw e2;
+    historicos = hist || [];
+  }
+
+  const histMap = new Map();
+  historicos.forEach((h) => {
+    if (!histMap.has(h.processo_id)) histMap.set(h.processo_id, h.changed_at);
+  });
+
+  return processos.map((p) => {
+    const base = histMap.get(p.id);
+    const prazo = base
+      ? new Date(
+          new Date(base).setHours(0, 0, 0, 0) + (prazoDias + 1) * DIA_MS
+        )
+          .toISOString()
+          .slice(0, 10)
+      : "";
+    return { processos: { nup: p.nup }, due_at: prazo };
+  });
+}
+
 function tableTemplate(cat) {
   const rows =
     cat.items
@@ -133,19 +172,32 @@ export default {
 
     try {
       await ensureSession();
-      const [taskRes, prazoRegional, parecerATM, parecerDT, parecerCGNA] =
-        await Promise.all([
-          supabase
-            .from("process_tasks")
-            .select("code, due_at, processos(nup)")
-            .or("code.ilike.PARECER_%,code.eq.SIGADAER_EXPEDIDO")
-            .is("started_at", null)
-            .order("due_at", { ascending: true }),
-          fetchPrazoRegional(),
-          fetchPareceres("ATM"),
-          fetchPareceres("DT"),
-          fetchPareceres("CGNA"),
-        ]);
+      const [
+        taskRes,
+        prazoRegional,
+        parecerATM,
+        parecerDT,
+        parecerCGNA,
+        parecerCOMGAP,
+        parecerCOMPREP,
+        parecerCOMAE,
+        respostaGABAER,
+      ] = await Promise.all([
+        supabase
+          .from("process_tasks")
+          .select("code, due_at, processos(nup)")
+          .or("code.ilike.PARECER_%,code.eq.SIGADAER_EXPEDIDO")
+          .is("started_at", null)
+          .order("due_at", { ascending: true }),
+        fetchPrazoRegional(),
+        fetchPareceres("ATM"),
+        fetchPareceres("DT"),
+        fetchPareceres("CGNA"),
+        fetchComunicacoes("COMGAP", 90),
+        fetchComunicacoes("COMPREP", 30),
+        fetchComunicacoes("COMAE", 30),
+        fetchComunicacoes("GABAER", 30),
+      ]);
       if (taskRes.error) throw taskRes.error;
 
       const grouped = (taskRes.data || []).reduce((acc, r) => {
@@ -176,6 +228,35 @@ export default {
           code: "PARECERES_CGNA",
           title: "Pareceres CGNA",
           items: parecerCGNA,
+        })
+      );
+
+      cards.push(
+        tableTemplate({
+          code: "PARECERES_COMGAP",
+          title: "Pareceres COMGAP",
+          items: parecerCOMGAP,
+        })
+      );
+      cards.push(
+        tableTemplate({
+          code: "PARECERES_COMPREP",
+          title: "Pareceres COMPREP",
+          items: parecerCOMPREP,
+        })
+      );
+      cards.push(
+        tableTemplate({
+          code: "PARECERES_COMAE",
+          title: "Pareceres COMAE",
+          items: parecerCOMAE,
+        })
+      );
+      cards.push(
+        tableTemplate({
+          code: "RESPOSTA_GABAER",
+          title: "Resposta GABAER",
+          items: respostaGABAER,
         })
       );
 
