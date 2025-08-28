@@ -159,8 +159,7 @@ function ensureLayoutCSS() {
     .prazo-body { flex:1 1 auto; min-height:0; overflow-y:auto; }
     .prazo-card .table { width:100%; border-collapse:collapse; }
     .prazo-card .table td {
-      border-bottom:1px dashed #bbb;
-      padding:4px 6px;
+      padding:4px 12px;
       font-size:12px;
       text-align:center;
       white-space:normal;
@@ -169,7 +168,6 @@ function ensureLayoutCSS() {
       justify-content:center;
       align-items:center;
     }
-    .prazo-card .table tr:last-child td { border-bottom:none; }
   `;
   document.head.appendChild(style);
 }
