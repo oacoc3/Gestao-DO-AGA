@@ -60,14 +60,41 @@ async function fetchPrazoRegional() {
   });
 }
 
-async function fetchPareceresPendentes() {
+async function fetchPareceresATM() {
   await ensureSession();
-  const { data, error } = await supabase
+  const { data: processos, error } = await supabase
     .from("processos")
-    .select("nup")
-    .overlaps("pareceres_pendentes", ["ATM", "DT", "CGNA"]);
+    .select("id, nup")
+    .contains("pareceres_pendentes", ["ATM"]);
   if (error) throw error;
-  return data || [];
+
+  const ids = processos.map((p) => p.id);
+  let historicos = [];
+  if (ids.length) {
+    const { data: hist, error: e2 } = await supabase
+      .from("status_history")
+      .select("processo_id, changed_at")
+      .contains("parecer_solicitado", ["ATM"])
+      .in("processo_id", ids)
+      .order("changed_at", { ascending: false });
+    if (e2) throw e2;
+    historicos = hist || [];
+  }
+
+  const histMap = new Map();
+  historicos.forEach((h) => {
+    if (!histMap.has(h.processo_id)) histMap.set(h.processo_id, h.changed_at);
+  });
+
+  return processos.map((p) => {
+    const base = histMap.get(p.id);
+    const prazo = base
+      ? new Date(new Date(base).getTime() + 10 * DIA_MS)
+          .toISOString()
+          .slice(0, 10)
+      : "";
+    return { processos: { nup: p.nup }, due_at: prazo };
+  });
 }
 
 function tableTemplate(cat) {
@@ -96,22 +123,6 @@ function tableTemplate(cat) {
   `;
 }
 
-function listTemplate(cat) {
-  const rows =
-    cat.items
-      .map((r) => `<tr><td>${r.nup || ""}</td></tr>`)
-      .join("") || `<tr><td>Nenhum registro.</td></tr>`;
-  return `
-    <div class="card prazo-card" id="card-${cat.code}">
-      <h2>${cat.title}</h2>
-      <table class="table">
-        <thead><tr><th>NUP</th></tr></thead>
-        <tbody id="body-${cat.code}">${rows}</tbody>
-      </table>
-    </div>
-  `;
-}
-
 export default {
   id: "prazos",
   title: "Prazos",
@@ -122,7 +133,7 @@ export default {
 
     try {
       await ensureSession();
-      const [taskRes, prazoRegional, parecerPendentes] = await Promise.all([
+      const [taskRes, prazoRegional, parecerATM] = await Promise.all([
         supabase
           .from("process_tasks")
           .select("code, due_at, processos(nup)")
@@ -130,7 +141,7 @@ export default {
           .is("started_at", null)
           .order("due_at", { ascending: true }),
         fetchPrazoRegional(),
-        fetchPareceresPendentes(),
+        fetchPareceresATM(),
       ]);
       if (taskRes.error) throw taskRes.error;
 
@@ -144,10 +155,10 @@ export default {
       );
 
       cards.push(
-        listTemplate({
-          code: "PARECERES_PENDENTES",
-          title: "Pareceres Pendentes",
-          items: parecerPendentes,
+        tableTemplate({
+          code: "PARECERES_ATM",
+          title: "Pareceres ATM",
+          items: parecerATM,
         })
       );
 
