@@ -34,6 +34,9 @@ button {
   align-items: flex-start;
   flex-wrap: wrap;
 }
+#prazos-root .prazo-card {
+  flex: 1 1 300px;
+}
 #card-PRAZO_REGIONAL {
   flex: 0 0 15%;
 }
