@@ -147,17 +147,27 @@ function ensureLayoutCSS() {
   style.textContent = `
     html, body { overflow:hidden; }
     .prazos-mod { display:flex; height:100%; overflow:hidden; padding:8px; }
-    #prazos-root { flex:1 1 auto; display:flex; gap:8px; overflow:hidden; }
+    #prazos-root { flex:1 1 auto; display:flex; gap:8px; overflow-x:auto; overflow-y:hidden; }
     #prazos-root .prazo-card { flex:1 1 0; min-width:0; display:flex; flex-direction:column; }
-    .prazo-card h2 { margin:0 0 8px 0; }
+    .prazo-card h2 {
+      margin:0 0 8px 0;
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      text-align:center;
+    }
     .prazo-body { flex:1 1 auto; min-height:0; overflow-y:auto; }
     .prazo-card .table { width:100%; border-collapse:collapse; }
     .prazo-card .table td {
       border-bottom:1px dashed #bbb;
       padding:4px 6px;
       font-size:12px;
-      text-align:left;
+      text-align:center;
       white-space:normal;
+      display:flex;
+      flex-direction:column;
+      justify-content:center;
+      align-items:center;
     }
     .prazo-card .table tr:last-child td { border-bottom:none; }
   `;
@@ -219,6 +229,8 @@ export default {
         parecerCOMPREP,
         parecerCOMAE,
         respostaGABAER,
+        terminoObra,
+        remocaoRebaix,
       ] = await Promise.all([
         supabase
           .from("process_tasks")
@@ -234,6 +246,8 @@ export default {
         fetchComunicacoes("COMPREP", 30),
         fetchComunicacoes("COMAE", 30),
         fetchComunicacoes("GABAER", 30),
+        fetchComunicacoes("Informar Término de Obra", 30),
+        fetchComunicacoes("Desfavorável - Remoção/Rebaixamento", 30),
       ]);
       if (taskRes.error) throw taskRes.error;
 
@@ -294,6 +308,21 @@ export default {
           code: "RESPOSTA_GABAER",
           title: "Resposta GABAER",
           items: respostaGABAER,
+        })
+      );
+
+      cards.push(
+        tableTemplate({
+          code: "TERMINO_OBRA",
+          title: "Término de Obra",
+          items: terminoObra,
+        })
+      );
+      cards.push(
+        tableTemplate({
+          code: "REMOCAO_REBAIXAMENTO",
+          title: "Remoção/Rebaixamento",
+          items: remocaoRebaix,
         })
       );
 
