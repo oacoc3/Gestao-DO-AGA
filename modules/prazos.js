@@ -159,7 +159,7 @@ function ensureLayoutCSS() {
     .prazo-body { flex:1 1 auto; min-height:0; overflow-y:auto; }
     .prazo-card .table { width:100%; border-collapse:collapse; }
     .prazo-card .table td {
-      padding:4px 12px;
+      padding:4px 16px;
       font-size:12px;
       text-align:center;
       white-space:normal;
