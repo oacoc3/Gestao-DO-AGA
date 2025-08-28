@@ -136,6 +136,37 @@ async function fetchComunicacoes(tipo, prazoDias) {
   });
 }
 
+function ensureLayoutCSS() {
+  if (document.getElementById("prazos-css")) return;
+  const style = document.createElement("style");
+  style.id = "prazos-css";
+  style.textContent = `
+    html, body { overflow:hidden; }
+    .prazos-mod { display:flex; height:100%; overflow:hidden; padding:8px; }
+    #prazos-root { flex:1 1 auto; display:flex; gap:8px; overflow:hidden; }
+    #prazos-root .prazo-card { flex:1 1 0; min-width:0; display:flex; flex-direction:column; }
+    .prazo-card h2 { margin:0 0 8px 0; }
+    .prazo-body { flex:1 1 auto; min-height:0; overflow-y:auto; }
+    .prazo-card .table { width:100%; border-collapse:collapse; }
+    .prazo-card .table th,
+    .prazo-card .table td {
+      border:1px solid #eee;
+      padding:4px 6px;
+      font-size:12px;
+      text-align:center;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function applyHeights(mod) {
+  const top = mod.getBoundingClientRect().top;
+  mod.style.height = window.innerHeight - top - 12 + "px";
+}
+
 function tableTemplate(cat) {
   const rows =
     cat.items
@@ -152,12 +183,14 @@ function tableTemplate(cat) {
   return `
     <div class="card prazo-card" id="card-${cat.code}">
       <h2>${cat.title}</h2>
-      <table class="table">
-        <thead>
-          <tr><th>NUP</th><th>Prazo</th></tr>
-        </thead>
-        <tbody id="body-${cat.code}">${rows}</tbody>
-      </table>
+      <div class="prazo-body">
+        <table class="table">
+          <thead>
+            <tr><th>NUP</th><th>Prazo</th></tr>
+          </thead>
+          <tbody id="body-${cat.code}">${rows}</tbody>
+        </table>
+      </div>
     </div>
   `;
 }
@@ -167,8 +200,13 @@ export default {
   title: "Prazos",
   route: "#/prazos",
   async view(container) {
-    container.innerHTML = `<div class="container" id="prazos-root"></div>`;
+    ensureLayoutCSS();
+    container.innerHTML = `<div class="prazos-mod"><div id="prazos-root"></div></div>`;
+    const mod = container.querySelector(".prazos-mod");
     const root = container.querySelector("#prazos-root");
+    const resize = () => applyHeights(mod);
+    window.addEventListener("resize", resize);
+    resize();
 
     try {
       await ensureSession();
