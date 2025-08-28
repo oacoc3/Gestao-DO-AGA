@@ -127,7 +127,7 @@ async function fetchComunicacoes(tipo, prazoDias) {
     const base = histMap.get(p.id);
     const prazo = base
       ? new Date(
-          new Date(base).setHours(0, 0, 0, 0) + (prazoDias + 1) * DIA_MS
+          new Date(base).setHours(0, 0, 0, 0) + prazoDias * DIA_MS
         )
           .toISOString()
           .slice(0, 10)
