@@ -113,9 +113,7 @@ async function fetchComunicacoes(tipo, prazoDias) {
     const { data: hist, error: e2 } = await supabase
       .from("status_history")
       .select("processo_id, changed_at")
-      .or(
-        `comunicacao_expedida.cs.{${tipo}},parecer_expedido.cs.{${tipo}}`
-      )
+      .or(`comunicacao_expedida.cs.{${tipo}},parecer_expedido.cs.{${tipo}}`)
       .in("processo_id", ids)
       .order("changed_at", { ascending: false });
     if (e2) throw e2;
@@ -137,6 +135,27 @@ async function fetchComunicacoes(tipo, prazoDias) {
           .slice(0, 10)
       : "";
     return { processos: { nup: p.nup }, due_at: prazo };
+  });
+}
+
+async function fetchRemocaoRebaix() {
+  await ensureSession();
+  const { data, error } = await supabase
+    .from("status_history")
+    .select("processo_id, changed_at, processos(nup)")
+    .contains("comunicacao", ["Desfavorável - Remoção/Rebaixamento"])
+    .order("changed_at", { ascending: false });
+  if (error) throw error;
+
+  const latest = new Map();
+  (data || []).forEach((r) => {
+    if (!latest.has(r.processo_id)) latest.set(r.processo_id, r);
+  });
+
+  return Array.from(latest.values()).map((r) => {
+    const base = new Date(r.changed_at).setHours(0, 0, 0, 0);
+    const prazo = new Date(base + 120 * DIA_MS).toISOString().slice(0, 10);
+    return { processos: { nup: r.processos?.nup }, due_at: prazo };
   });
 }
 
@@ -169,6 +188,7 @@ function ensureLayoutCSS() {
       align-items:center;
       border:none;
     }
+    .prazo-card .table tr:not(:last-child) td { border-bottom:1px dashed #999; }
   `;
   document.head.appendChild(style);
 }
@@ -180,7 +200,15 @@ function applyHeights(mod) {
 
 function tableTemplate(cat) {
   const rows =
-    cat.items
+    (cat.items || [])
+      .slice()
+      .sort((a, b) => {
+        const da = Date.parse(a.due_at);
+        const db = Date.parse(b.due_at);
+        if (isNaN(da)) return 1;
+        if (isNaN(db)) return -1;
+        return da - db;
+      })
       .map((r) => {
         const nup = r.processos?.nup || "";
         const prazo = r.due_at
@@ -246,7 +274,7 @@ export default {
         fetchComunicacoes("COMAE", 30),
         fetchComunicacoes("GABAER", 30),
         fetchComunicacoes("Informar Término de Obra", 30),
-        fetchComunicacoes("Desfavorável - Remoção/Rebaixamento", 30),
+        fetchRemocaoRebaix(),
       ]);
       if (taskRes.error) throw taskRes.error;
 
