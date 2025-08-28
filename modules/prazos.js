@@ -101,7 +101,7 @@ export default {
           .from("process_tasks")
           .select("code, due_at, processos(nup)")
           .or("code.ilike.PARECER_%,code.eq.SIGADAER_EXPEDIDO")
-          .is("received_at", null)
+          .is("started_at", null)
           .order("due_at", { ascending: true }),
         fetchPrazoRegional(),
       ]);
