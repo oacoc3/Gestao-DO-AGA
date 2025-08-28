@@ -60,12 +60,12 @@ async function fetchPrazoRegional() {
   });
 }
 
-async function fetchPareceresATM() {
+async function fetchPareceres(tipo) {
   await ensureSession();
   const { data: processos, error } = await supabase
     .from("processos")
     .select("id, nup")
-    .contains("pareceres_pendentes", ["ATM"]);
+    .contains("pareceres_pendentes", [tipo]);
   if (error) throw error;
 
   const ids = processos.map((p) => p.id);
@@ -74,7 +74,7 @@ async function fetchPareceresATM() {
     const { data: hist, error: e2 } = await supabase
       .from("status_history")
       .select("processo_id, changed_at")
-      .contains("parecer_solicitado", ["ATM"])
+      .contains("parecer_solicitado", [tipo])
       .in("processo_id", ids)
       .order("changed_at", { ascending: false });
     if (e2) throw e2;
@@ -89,7 +89,7 @@ async function fetchPareceresATM() {
   return processos.map((p) => {
     const base = histMap.get(p.id);
     const prazo = base
-      ? new Date(new Date(base).getTime() + 10 * DIA_MS)
+      ? new Date(new Date(base).setHours(0, 0, 0, 0) + 11 * DIA_MS)
           .toISOString()
           .slice(0, 10)
       : "";
@@ -133,16 +133,19 @@ export default {
 
     try {
       await ensureSession();
-      const [taskRes, prazoRegional, parecerATM] = await Promise.all([
-        supabase
-          .from("process_tasks")
-          .select("code, due_at, processos(nup)")
-          .or("code.ilike.PARECER_%,code.eq.SIGADAER_EXPEDIDO")
-          .is("started_at", null)
-          .order("due_at", { ascending: true }),
-        fetchPrazoRegional(),
-        fetchPareceresATM(),
-      ]);
+      const [taskRes, prazoRegional, parecerATM, parecerDT, parecerCGNA] =
+        await Promise.all([
+          supabase
+            .from("process_tasks")
+            .select("code, due_at, processos(nup)")
+            .or("code.ilike.PARECER_%,code.eq.SIGADAER_EXPEDIDO")
+            .is("started_at", null)
+            .order("due_at", { ascending: true }),
+          fetchPrazoRegional(),
+          fetchPareceres("ATM"),
+          fetchPareceres("DT"),
+          fetchPareceres("CGNA"),
+        ]);
       if (taskRes.error) throw taskRes.error;
 
       const grouped = (taskRes.data || []).reduce((acc, r) => {
@@ -159,6 +162,20 @@ export default {
           code: "PARECERES_ATM",
           title: "Pareceres ATM",
           items: parecerATM,
+        })
+      );
+      cards.push(
+        tableTemplate({
+          code: "PARECERES_DT",
+          title: "Pareceres DT",
+          items: parecerDT,
+        })
+      );
+      cards.push(
+        tableTemplate({
+          code: "PARECERES_CGNA",
+          title: "Pareceres CGNA",
+          items: parecerCGNA,
         })
       );
 
