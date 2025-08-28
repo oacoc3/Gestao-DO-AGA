@@ -152,16 +152,14 @@ function ensureLayoutCSS() {
     .prazo-card h2 { margin:0 0 8px 0; }
     .prazo-body { flex:1 1 auto; min-height:0; overflow-y:auto; }
     .prazo-card .table { width:100%; border-collapse:collapse; }
-    .prazo-card .table th,
     .prazo-card .table td {
-      border:1px solid #eee;
+      border-bottom:1px dashed #bbb;
       padding:4px 6px;
       font-size:12px;
-      text-align:center;
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
+      text-align:left;
+      white-space:normal;
     }
+    .prazo-card .table tr:last-child td { border-bottom:none; }
   `;
   document.head.appendChild(style);
 }
@@ -181,17 +179,14 @@ function tableTemplate(cat) {
             ? r.due_at
             : new Date(r.due_at).toLocaleDateString()
           : "";
-        return `<tr><td>${nup}</td><td>${prazo}</td></tr>`;
+        return `<tr><td><div>${nup}</div><div>${prazo}</div></td></tr>`;
       })
-      .join("") || `<tr><td colspan="2">Nenhum registro.</td></tr>`;
+      .join("") || `<tr><td>Nenhum registro.</td></tr>`;
   return `
     <div class="card prazo-card" id="card-${cat.code}">
       <h2>${cat.title}</h2>
       <div class="prazo-body">
         <table class="table">
-          <thead>
-            <tr><th>NUP</th><th>Prazo</th></tr>
-          </thead>
           <tbody id="body-${cat.code}">${rows}</tbody>
         </table>
       </div>
