@@ -102,7 +102,9 @@ async function fetchComunicacoes(tipo, prazoDias) {
   const { data: processos, error } = await supabase
     .from("processos")
     .select("id, nup")
-    .contains("comunicacoes_pendentes", [tipo]);
+    .or(
+      `comunicacoes_pendentes.cs.{${tipo}},pareceres_pendentes.cs.{${tipo}}`
+    );
   if (error) throw error;
 
   const ids = processos.map((p) => p.id);
@@ -111,7 +113,9 @@ async function fetchComunicacoes(tipo, prazoDias) {
     const { data: hist, error: e2 } = await supabase
       .from("status_history")
       .select("processo_id, changed_at")
-      .contains("comunicacao_expedida", [tipo])
+      .or(
+        `comunicacao_expedida.cs.{${tipo}},parecer_expedido.cs.{${tipo}}`
+      )
       .in("processo_id", ids)
       .order("changed_at", { ascending: false });
     if (e2) throw e2;
