@@ -60,6 +60,16 @@ async function fetchPrazoRegional() {
   });
 }
 
+async function fetchPareceresPendentes() {
+  await ensureSession();
+  const { data, error } = await supabase
+    .from("processos")
+    .select("nup")
+    .overlaps("pareceres_pendentes", ["ATM", "DT", "CGNA"]);
+  if (error) throw error;
+  return data || [];
+}
+
 function tableTemplate(cat) {
   const rows =
     cat.items
@@ -86,6 +96,22 @@ function tableTemplate(cat) {
   `;
 }
 
+function listTemplate(cat) {
+  const rows =
+    cat.items
+      .map((r) => `<tr><td>${r.nup || ""}</td></tr>`)
+      .join("") || `<tr><td>Nenhum registro.</td></tr>`;
+  return `
+    <div class="card prazo-card" id="card-${cat.code}">
+      <h2>${cat.title}</h2>
+      <table class="table">
+        <thead><tr><th>NUP</th></tr></thead>
+        <tbody id="body-${cat.code}">${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
 export default {
   id: "prazos",
   title: "Prazos",
@@ -96,7 +122,7 @@ export default {
 
     try {
       await ensureSession();
-      const [taskRes, prazoRegional] = await Promise.all([
+      const [taskRes, prazoRegional, parecerPendentes] = await Promise.all([
         supabase
           .from("process_tasks")
           .select("code, due_at, processos(nup)")
@@ -104,6 +130,7 @@ export default {
           .is("started_at", null)
           .order("due_at", { ascending: true }),
         fetchPrazoRegional(),
+        fetchPareceresPendentes(),
       ]);
       if (taskRes.error) throw taskRes.error;
 
@@ -114,6 +141,14 @@ export default {
 
       const cards = Object.entries(grouped).map(([code, items]) =>
         tableTemplate({ code, title: TITLES[code] || code, items })
+      );
+
+      cards.push(
+        listTemplate({
+          code: "PARECERES_PENDENTES",
+          title: "Pareceres Pendentes",
+          items: parecerPendentes,
+        })
       );
 
       cards.push(
