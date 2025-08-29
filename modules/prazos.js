@@ -154,9 +154,21 @@ async function fetchRemocaoRebaix() {
 
   return Array.from(latest.values()).map((r) => {
     const base = new Date(r.changed_at).setHours(0, 0, 0, 0);
-    const prazo = new Date(base + 120 * DIA_MS).toISOString().slice(0, 10);
+    const prazo = new Date(base + 121 * DIA_MS).toISOString().slice(0, 10);
     return { processos: { nup: r.processos?.nup }, due_at: prazo };
   });
+}
+
+async function fetchSobrestamento() {
+  await ensureSession();
+  const { data, error } = await supabase
+    .from("process_tasks")
+    .select("processos(nup), due_at")
+    .ilike("code", "SOBRESTADO%")
+    .is("started_at", null)
+    .order("due_at", { ascending: true });
+  if (error) throw error;
+  return data || [];
 }
 
 function ensureLayoutCSS() {
@@ -174,6 +186,7 @@ function ensureLayoutCSS() {
       justify-content:center;
       align-items:center;
       text-align:center;
+      font-size:14px;
     }
     .prazo-body { flex:1 1 auto; min-height:0; overflow-y:auto; }
     .prazo-card .table { width:100%; border-collapse:collapse; }
@@ -258,6 +271,7 @@ export default {
         respostaGABAER,
         terminoObra,
         remocaoRebaix,
+        sobrestamento,
       ] = await Promise.all([
         supabase
           .from("process_tasks")
@@ -275,6 +289,7 @@ export default {
         fetchComunicacoes("GABAER", 30),
         fetchComunicacoes("Informar Término de Obra", 30),
         fetchRemocaoRebaix(),
+        fetchSobrestamento(),
       ]);
       if (taskRes.error) throw taskRes.error;
 
@@ -350,6 +365,14 @@ export default {
           code: "REMOCAO_REBAIXAMENTO",
           title: "Remoção/Rebaixamento",
           items: remocaoRebaix,
+        })
+      );
+
+      cards.push(
+        tableTemplate({
+          code: "SOBRESTAMENTO",
+          title: "Sobrestamento",
+          items: sobrestamento,
         })
       );
 
