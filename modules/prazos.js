@@ -60,7 +60,7 @@ async function fetchPrazoRegional() {
   });
 }
 
-async function fetchPareceres(tipo) {
+async function fetchPareceres(tipo, prazoDias) {
   await ensureSession();
   const { data: processos, error } = await supabase
     .from("processos")
@@ -89,7 +89,9 @@ async function fetchPareceres(tipo) {
   return processos.map((p) => {
     const base = histMap.get(p.id);
     const prazo = base
-      ? new Date(new Date(base).setHours(0, 0, 0, 0) + 11 * DIA_MS)
+      ? new Date(
+          new Date(base).setHours(0, 0, 0, 0) + (prazoDias + 1) * DIA_MS
+        )
           .toISOString()
           .slice(0, 10)
       : "";
@@ -136,6 +138,21 @@ async function fetchComunicacoes(tipo, prazoDias) {
       : "";
     return { processos: { nup: p.nup }, due_at: prazo };
   });
+}
+
+async function fetchTerminoObra() {
+  await ensureSession();
+  const { data, error } = await supabase
+    .from("processos")
+    .select("nup, termino_obra")
+    .or(
+      "pareceres_pendentes.cs.{Favorável - Obra em Andamento},pareceres_pendentes.cs.{Favorável - Obra Não Iniciada}"
+    );
+  if (error) throw error;
+  return (data || []).map((p) => ({
+    processos: { nup: p.nup },
+    due_at: p.termino_obra || "",
+  }));
 }
 
 async function fetchRemocaoRebaix() {
@@ -304,7 +321,10 @@ export default {
         parecerCOMPREP,
         parecerCOMAE,
         respostaGABAER,
-        terminoObra,
+        terminoObraAtraso,
+        naoConfDoc,
+        naoConfTec,
+        prazoObraFavoravel,
         remocaoRebaix,
         sobrestamento,
       ] = await Promise.all([
@@ -315,14 +335,17 @@ export default {
           .is("started_at", null)
           .order("due_at", { ascending: true }),
         fetchPrazoRegional(),
-        fetchPareceres("ATM"),
-        fetchPareceres("DT"),
-        fetchPareceres("CGNA"),
+        fetchPareceres("ATM", 10),
+        fetchPareceres("DT", 10),
+        fetchPareceres("CGNA", 30),
         fetchComunicacoes("COMGAP", 90),
         fetchComunicacoes("COMPREP", 30),
         fetchComunicacoes("COMAE", 30),
         fetchComunicacoes("GABAER", 30),
-        fetchComunicacoes("Informar Término de Obra", 30),
+        fetchComunicacoes("Término de Obra - Atraso", 30),
+        fetchComunicacoes("Não Conformidade Documental", 60),
+        fetchComunicacoes("Não Conformidade Técnica", 120),
+        fetchTerminoObra(),
         fetchRemocaoRebaix(),
         fetchSobrestamento(),
       ]);
@@ -392,8 +415,22 @@ export default {
         tableTemplate({
           code: "TERMINO_OBRA",
           title: "Término de Obra",
-          items: terminoObra,
+          items: [...terminoObraAtraso, ...prazoObraFavoravel],
         })
+      );
+      cards.push(
+        stackTemplate(
+          {
+            code: "NAO_CONFORMIDADE_DOC",
+            title: "Não Conformidade Documental",
+            items: naoConfDoc,
+          },
+          {
+            code: "NAO_CONFORMIDADE_TEC",
+            title: "Não Conformidade Técnica",
+            items: naoConfTec,
+          }
+        )
       );
       cards.push(
         tableTemplate({
