@@ -57,14 +57,16 @@ const RECEBIMENTO_EXTRA_MAP = {
   "Exploração": "SAC - Exploração",
 };
 const RECEBIMENTO_EXTRA_OPCOES = Object.values(RECEBIMENTO_EXTRA_MAP);
-// Opções de notificação
+// Opções de notificação (atualizadas)
 const NOTIFICACAO_OPCOES = [
-  "Favorável - Não Iniciada",
-  "Favorável - Em andamento",
+  "Favorável - Obra Não Iniciada",
+  "Favorável - Obra em Andamento",
   "Favorável - Concluída",
   "Desfavorável - Remoção/Rebaixamento",
   "Desfavorável - JJAER",
-  "Informar Término de Obra",
+  "Término de Obra - Atraso",
+  "Não Conformidade Documental",
+  "Não Conformidade Técnica",
 ];
 const ALL_PARECERES = Array.from(new Set([
   ...PARECER_OPCOES,
@@ -138,11 +140,13 @@ async function createProcesso(payload) {
   if (error) throw error;
   return data;
 }
-async function updateStatus(id, newStatus) {
+async function updateStatus(id, newStatus, terminoObra) {
   await ensureSession();
+  const payload = { status: newStatus };
+  if (terminoObra !== undefined) payload.termino_obra = terminoObra || null;
   const { data, error } = await supabase
     .from("processos")
-    .update({ status: newStatus })
+    .update(payload)
     .eq("id", id)
     .select()
     .single();
@@ -677,6 +681,10 @@ function viewFormulario() {
           <label>1ª Entrada Regional</label>
           <input id="f-entrada" type="date" disabled />
         </div>
+        <div style="min-width:160px; flex:1 1 160px">
+          <label>Término de Obra</label>
+          <input id="f-termino" type="date" disabled />
+        </div>
         <div style="min-width:200px; flex:1 1 200px">
           <label>Status</label>
           <select id="f-status" disabled>
@@ -835,6 +843,7 @@ export default {
     const $nup = el("#f-nup");
     const $tipo = el("#f-tipo");
     const $entrada = el("#f-entrada");
+    const $termino = el("#f-termino");
     const $status = el("#f-status");
     const $buscar = el("#btn-buscar");
     const $limpar = el("#btn-limpar");
@@ -855,6 +864,7 @@ export default {
     let currentAction = null;   // 'update' | 'create' | null
     let currentRowId = null;
     let originalStatus = null;
+    let originalTermino = "";
     let pendingNup = "";
     let currentNupMasked = "";
 
@@ -883,10 +893,10 @@ export default {
     function resetForm(clearNup=false) {
       $msg.textContent = "";
       if (clearNup) $nup.value = "";
-      $tipo.value = ""; $entrada.value = ""; $status.value = "";
-      $tipo.disabled = true; $entrada.disabled = true; $status.disabled = true;
+      $tipo.value = ""; $entrada.value = ""; $termino.value = ""; $status.value = "";
+      $tipo.disabled = true; $entrada.disabled = true; $termino.disabled = true; $status.disabled = true;
       $salvar.disabled = true; $excluir.disabled = true; $parecer.disabled = true; $expedir.disabled = true; $receber.disabled = true; $recebimento.disabled = true; $envioNotif.disabled = true; $cienciaNotif.disabled = true;
-      currentAction = null; currentRowId = null; originalStatus = null; pendingNup = ""; currentNupMasked = "";
+      currentAction = null; currentRowId = null; originalStatus = null; originalTermino = ""; pendingNup = ""; currentNupMasked = "";
       pinnedId = null; // remove o pino ao limpar
     }
     function setCreateMode(nupMasked) {
@@ -894,6 +904,7 @@ export default {
       currentAction = "create";
       pendingNup = nupMasked;
       currentNupMasked = nupMasked;
+      originalTermino = "";
 
       $nup.value = nupMasked; // garante máscara no campo
       $tipo.value = "";
@@ -902,6 +913,7 @@ export default {
 
       $tipo.disabled = false;
       $entrada.disabled = false;
+      $termino.disabled = false;
       $status.disabled = false;
 
       $salvar.disabled = false;
@@ -914,16 +926,19 @@ export default {
       currentAction = "update";
       currentRowId = row.id;
       originalStatus = row.status;
+      originalTermino = row.termino_obra || "";
       currentNupMasked = displayNUP(row.nup);
 
       // preenche e bloqueia tipo/entrada; status editável
       $nup.value = currentNupMasked;
       $tipo.value = row.tipo || "";
       $entrada.value = row.entrada_regional || "";
+      $termino.value = row.termino_obra || "";
       $status.value = row.status || "";
 
       $tipo.disabled = true;
       $entrada.disabled = true;
+      $termino.disabled = false;
       $status.disabled = false;
 
       $salvar.disabled = true;
@@ -955,9 +970,15 @@ export default {
       if (!$status.value) { alert("Selecione o Status."); return false; }
       return true;
     }
-    $status.addEventListener("change", () => {
-      if (currentAction === "update") $salvar.disabled = ($status.value === originalStatus || !$status.value);
-    });
+    function checkSaveDisabled() {
+      if (currentAction === "update") {
+        $salvar.disabled = ((
+          $status.value === originalStatus && $termino.value === originalTermino
+        ) || !$status.value);
+      }
+    }
+    $status.addEventListener("change", checkSaveDisabled);
+    $termino.addEventListener("change", checkSaveDisabled);
 
     // viewData (mapeia allList -> grid) — NUP sempre mascarado
     function buildViewData() {
@@ -1222,10 +1243,10 @@ export default {
     $salvar.addEventListener("click", async () => {
       try {
         if (currentAction === "update") {
-          if ($status.value === originalStatus || !$status.value) { alert("Altere o Status para salvar."); return; }
-          await updateStatus(currentRowId, $status.value);
-          $msg.textContent = "Status atualizado com sucesso.";
-          originalStatus = $status.value; $salvar.disabled = true;
+          if (($status.value === originalStatus && $termino.value === originalTermino) || !$status.value) { alert("Altere o Status ou o Término de Obra para salvar."); return; }
+          await updateStatus(currentRowId, $status.value, $termino.value);
+          $msg.textContent = "Dados atualizados com sucesso.";
+          originalStatus = $status.value; originalTermino = $termino.value; $salvar.disabled = true;
           await refreshFirstPage();
           const hist = await getHistorico(currentRowId);
           histPane.innerHTML = viewHistorico(`Histórico — ${currentNupMasked}`, hist);
@@ -1235,7 +1256,8 @@ export default {
             nup: pendingNup, // já mascarado
             tipo: $tipo.value,
             status: $status.value,
-            entrada_regional: $entrada.value
+            entrada_regional: $entrada.value,
+            termino_obra: $termino.value || null
           };
           const novo = await createProcesso(payload);
           $msg.textContent = "Processo criado com sucesso.";
