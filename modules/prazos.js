@@ -178,9 +178,23 @@ function ensureLayoutCSS() {
   style.textContent = `
     html, body { overflow:hidden; }
     .prazos-mod { display:flex; height:100%; overflow:hidden; padding:8px; }
-    #prazos-root { flex:1 1 auto; display:flex; gap:8px; overflow-x:auto; overflow-y:hidden; }
-    #prazos-root .prazo-card { flex:1 1 0; min-width:0; display:flex; flex-direction:column; }
-    #prazos-root .prazo-stack { flex:1 1 0; min-width:0; display:flex; flex-direction:column; gap:8px; }
+    #prazos-root {
+      flex:1 1 auto;
+      display:grid;
+      grid-auto-flow:column;
+      grid-auto-columns:1fr;
+      gap:8px;
+      width:100%;
+      overflow-x:auto;
+      overflow-y:hidden;
+    }
+    #prazos-root .prazo-card,
+    #prazos-root .prazo-stack {
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+    }
+    #prazos-root .prazo-stack { gap:8px; }
     #prazos-root .prazo-stack .prazo-card { flex:1 1 0; }
     .prazo-card h2 {
       margin:0 0 8px 0;
