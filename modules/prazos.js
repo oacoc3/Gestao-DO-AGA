@@ -142,16 +142,27 @@ async function fetchComunicacoes(tipo, prazoDias) {
 
 async function fetchTerminoObra() {
   await ensureSession();
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("processos")
     .select("nup, termino_obra")
     .or(
       "pareceres_pendentes.cs.{Favorável - Obra em Andamento},pareceres_pendentes.cs.{Favorável - Obra Não Iniciada}"
     );
+  if (error && /termino_obra/i.test(error.message)) {
+    const res = await supabase
+      .from("processos")
+      .select("nup")
+      .or(
+        "pareceres_pendentes.cs.{Favorável - Obra em Andamento},pareceres_pendentes.cs.{Favorável - Obra Não Iniciada}"
+      );
+    if (res.error) throw res.error;
+    data = res.data;
+    error = null;
+  }
   if (error) throw error;
   return (data || []).map((p) => ({
     processos: { nup: p.nup },
-    due_at: p.termino_obra || "",
+    due_at: p.termino_obra || p.termino || "",
   }));
 }
 
