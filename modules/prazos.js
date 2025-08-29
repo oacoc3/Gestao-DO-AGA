@@ -198,11 +198,9 @@ function ensureLayoutCSS() {
     #prazos-root .prazo-stack .prazo-card { flex:1 1 0; }
     .prazo-card h2 {
       margin:0 0 8px 0;
-      display:flex;
-      justify-content:center;
-      align-items:center;
       text-align:center;
       font-size:14px;
+      white-space:pre-line;
     }
     .prazo-body { flex:1 1 auto; min-height:0; overflow-y:auto; }
     .prazo-card .table { width:100%; border-collapse:collapse; }
@@ -227,6 +225,17 @@ function applyHeights(mod) {
   mod.style.height = window.innerHeight - top - 12 + "px";
 }
 
+function formatTitle(title) {
+  if (!title) return "";
+  if (title.includes(" - ")) return title.replace(" - ", "\n");
+  if (title.includes("/")) {
+    const [a, b] = title.split("/");
+    return `${a}\n${b}`;
+  }
+  const idx = title.lastIndexOf(" ");
+  return idx >= 0 ? title.slice(0, idx) + "\n" + title.slice(idx + 1) : title;
+}
+
 function tableTemplate(cat) {
   const rows =
     (cat.items || [])
@@ -248,9 +257,10 @@ function tableTemplate(cat) {
         return `<tr><td><div>${nup}</div><div>${prazo}</div></td></tr>`;
       })
       .join("") || `<tr><td>Nenhum registro.</td></tr>`;
+  const title = formatTitle(cat.title);
   return `
     <div class="card prazo-card" id="card-${cat.code}">
-      <h2>${cat.title}</h2>
+      <h2>${title}</h2>
       <div class="prazo-body">
         <table class="table">
           <tbody id="body-${cat.code}">${rows}</tbody>
@@ -396,7 +406,7 @@ export default {
       cards.push(
         tableTemplate({
           code: "SOBRESTAMENTO",
-          title: "Sobrestamento",
+          title: "Aguardando - Sobrestados",
           items: sobrestamento,
         })
       );
