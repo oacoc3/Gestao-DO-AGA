@@ -415,22 +415,22 @@ function ensureLayoutCSS() {
 
     /* Formulário compacto */
     .proc-form-card { flex:0 0 auto; padding-top:8px; padding-bottom:8px; }
-    .proc-form-row { display:flex; align-items:flex-end; gap:8px; flex-wrap:nowrap; overflow:auto; }
-    .proc-form-row > div { display:flex; flex-direction:column; }
+    .proc-form-row { display:flex; align-items:flex-end; gap:8px; flex-wrap:wrap; overflow:visible; }
+    .proc-form-row > div { display:flex; flex-direction:column; flex:1 1 120px; }
     .proc-form-row label { font-size:0.95rem; margin-bottom:2px; }
-    .proc-form-row input, .proc-form-row select, .proc-form-row button { height:34px; }
-    .proc-form-row button { width:130px; white-space:normal; font-size:11px; height:auto; min-height:34px; line-height:1.2; }
+    .proc-form-row input, .proc-form-row select, .proc-form-row button { height:34px; width:100%; }
+    .proc-form-row button { white-space:normal; font-size:11px; height:auto; min-height:34px; line-height:1.2; }
 
     /* Split: processos 65%, histórico 35% */
-    .proc-split { display:flex; gap:10px; overflow:hidden; }
+    .proc-split { display:flex; overflow:hidden; }
     .proc-pane { min-width:0; display:flex; flex-direction:column; overflow:hidden; }
-    .grid-pane { flex:0 0 65%; }
-    .hist-pane { flex:0 0 35%; }
+    .grid-pane { flex:1 1 auto; }
     .pane-title { margin:0 0 8px 0; }
     .pane-body { flex:1 1 auto; min-height:0; overflow:hidden; display:flex; } /* rolagem interna */
 
     /* Grid de processos */
     :root{
+      --w-hist: clamp(9ch, 11ch, 13ch);
       --w-nup: 20ch;
       --w-tipo: clamp(14ch, 18ch, 24ch);
       --w-notif: clamp(10ch, 12ch, 16ch);
@@ -446,6 +446,7 @@ function ensureLayoutCSS() {
     .proc-grid-row{
       display: grid;
       grid-template-columns:
+        var(--w-hist)
         var(--w-nup)
         var(--w-tipo)
         minmax(0, 1.4fr)
@@ -470,8 +471,8 @@ function ensureLayoutCSS() {
       padding: 4px 6px;
       font-size: 12px;
     }
-    .proc-grid-row > div:nth-child(4),
-    .proc-grid-row > div:nth-child(5){
+    .proc-grid-row > div:nth-child(5),
+    .proc-grid-row > div:nth-child(6){
       white-space: normal;
       overflow: visible;
       text-overflow: unset;
@@ -489,6 +490,10 @@ function ensureLayoutCSS() {
     .filter-select { font-size:11px; }
 
     .proc-grid-row.row-selected { outline:2px solid #999; outline-offset:-1px; }
+    .hist-btn { width:100%; }
+    #hist-dialog { border:none; padding:0; }
+    #hist-dialog::backdrop { background:rgba(0,0,0,0.3); }
+    #hist-dialog .hist-content { max-height:80vh; overflow:auto; }
     .badge-parecer{ font-size:10px; padding:1px 4px; border:1px solid transparent; line-height:1.1; }
     .badge-parecer .sub{ font-size:8px; display:block; }
     /* >>> Patch: troca as cores das badges para pendente/expedir */
@@ -581,6 +586,7 @@ function plainHeaderCell(labelHtml) {
 function viewTabela(listView, sort, filters) {
   const header = `
     <div class="proc-grid-header">
+      ${plainHeaderCell("Histórico")}
       ${headerCell("nup","NUP",sort)}
       ${filterHeaderCell("tipo","Tipo",TIPOS,filters.tipo)}
       ${filterHeaderCell("status","Status",STATUS,filters.status)}
@@ -592,6 +598,7 @@ function viewTabela(listView, sort, filters) {
   `;
   const body = listView.map(v => `
     <div class="proc-grid-row" data-id="${v.id}" data-nup="${v.nup}">
+      <div><button class="hist-btn" data-id="${v.id}">Histórico</button></div>
       <div>${v.nup}</div>
       <div>${v.tipo}</div>
       <div>${v.status}</div>
@@ -657,6 +664,14 @@ function viewHistorico(title, hist) {
   `;
 }
 
+function showHistoricoModal(title, hist) {
+  const dlg = document.getElementById("hist-dialog");
+  if (!dlg) return;
+  dlg.innerHTML = `<div class="hist-content">${viewHistorico(title, hist)}<div style="text-align:right;margin:8px"><button id="hist-close">Fechar</button></div></div>`;
+  dlg.querySelector("#hist-close").addEventListener("click", () => dlg.close());
+  dlg.showModal();
+}
+
 /* =========================
    Formulário
    ========================= */
@@ -668,8 +683,8 @@ function viewFormulario() {
           <label>Insira o NUP do Processo</label>
           <input id="f-nup" inputmode="numeric" autocomplete="off" placeholder="00000.000000/0000-00" />
         </div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-buscar">Buscar</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-limpar" type="button">Limpar</button></div>
+        <div style="min-width:120px; flex:1 1 120px"><label>&nbsp;</label><button id="btn-buscar">Buscar</button></div>
+        <div style="min-width:120px; flex:1 1 120px"><label>&nbsp;</label><button id="btn-limpar" type="button">Limpar</button></div>
         <div style="min-width:180px; flex:1 1 180px">
           <label>Tipo</label>
           <select id="f-tipo" disabled>
@@ -692,17 +707,17 @@ function viewFormulario() {
             ${STATUS.map(s => `<option value="${s}">${s}</option>`).join("")}
           </select>
         </div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-salvar" disabled>Salvar</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-excluir" disabled>Excluir</button></div>
+        <div style="min-width:120px; flex:1 1 120px"><label>&nbsp;</label><button id="btn-salvar" disabled>Salvar</button></div>
+        <div style="min-width:120px; flex:1 1 120px"><label>&nbsp;</label><button id="btn-excluir" disabled>Excluir</button></div>
       </div>
       <div class="proc-form-row">
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-parecer" disabled>Parecer Interno</button></div>
+        <div style="min-width:120px; flex:1 1 120px"><label>&nbsp;</label><button id="btn-parecer" disabled>Parecer Interno</button></div>
         <!-- >>> Patch: adiciona botões de expedição e recebimento -->
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-expedir" disabled>Necessidade SIGADAER</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-receber" disabled>Expedição SIGADAER</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-recebimento" disabled>Recebimento</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-envio-notificacao" disabled>Registrar Envio de Notificação</button></div>
-        <div style="flex:0 0 auto"><label>&nbsp;</label><button id="btn-ciencia-notificacao" disabled>Registrar Ciência de Notificação</button></div>
+        <div style="min-width:120px; flex:1 1 120px"><label>&nbsp;</label><button id="btn-expedir" disabled>Necessidade SIGADAER</button></div>
+        <div style="min-width:120px; flex:1 1 120px"><label>&nbsp;</label><button id="btn-receber" disabled>Expedição SIGADAER</button></div>
+        <div style="min-width:120px; flex:1 1 120px"><label>&nbsp;</label><button id="btn-recebimento" disabled>Recebimento</button></div>
+        <div style="min-width:120px; flex:1 1 120px"><label>&nbsp;</label><button id="btn-envio-notificacao" disabled>Registrar Envio de Notificação</button></div>
+        <div style="min-width:120px; flex:1 1 120px"><label>&nbsp;</label><button id="btn-ciencia-notificacao" disabled>Registrar Ciência de Notificação</button></div>
       </div>
       <div id="msg-novo" class="small" style="margin-top:6px"></div>
     </div>
@@ -716,16 +731,23 @@ function bindTabela(container, refresh, onPickRow) {
   // clique nas linhas
   container.querySelectorAll(".proc-grid-row").forEach(row => {
     const id = row.getAttribute("data-id");
-    const nupMasked = row.getAttribute("data-nup"); // já vem mascarado
-    row.addEventListener("click", async () => {
+    row.addEventListener("click", () => {
       onPickRow(id);
+      container.querySelectorAll(".proc-grid-row").forEach(r => r.classList.remove("row-selected"));
+      row.classList.add("row-selected");
+    });
+  });
+
+  container.querySelectorAll(".hist-btn").forEach(btn => {
+    btn.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const id = btn.getAttribute("data-id");
+      const row = btn.closest(".proc-grid-row");
+      const nupMasked = row ? row.getAttribute("data-nup") : "";
       try {
-        container.querySelectorAll(".proc-grid-row").forEach(r => r.classList.remove("row-selected"));
-        row.classList.add("row-selected");
         const hist = await getHistorico(id);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
-        const pane = document.getElementById("hist-pane");
-        pane.innerHTML = viewHistorico(`Histórico — ${nupMasked}`, hist);
+        showHistoricoModal(`Histórico — ${nupMasked}`, hist);
       } catch (e) {
         alert("Erro ao carregar histórico: " + e.message);
       }
@@ -825,9 +847,6 @@ export default {
       <div class="container proc-mod">
         ${viewFormulario()}
         <div class="proc-split">
-          <div class="card proc-pane hist-pane" id="hist-pane">
-            ${viewHistorico("Histórico", [])}
-          </div>
           <div class="card proc-pane grid-pane" id="grid-pane">
             <h3 class="pane-title">Lista de processos</h3>
             <div class="pane-body">
@@ -835,6 +854,7 @@ export default {
             </div>
           </div>
         </div>
+        <dialog id="hist-dialog"></dialog>
       </div>
     `;
 
@@ -857,7 +877,6 @@ export default {
     const $cienciaNotif = el("#btn-ciencia-notificacao");
     const $msg = el("#msg-novo");
     const gridWrap = el("#grid");
-    const histPane = el("#hist-pane");
     const root = container;
 
     // estado
@@ -920,7 +939,6 @@ export default {
       $excluir.disabled = true; $parecer.disabled = true; $expedir.disabled = true; $receber.disabled = true; $recebimento.disabled = true; $envioNotif.disabled = true; $cienciaNotif.disabled = true;
 
       $msg.textContent = "Preencha os campos e clique em Salvar.";
-      histPane.innerHTML = viewHistorico(`Histórico — ${nupMasked}`, []);
     }
     function setUpdateMode(row) {
       currentAction = "update";
@@ -1214,14 +1232,12 @@ export default {
           currentRowId = row.id;
           await upsertPinnedRow(row); // garante a 1ª linha
           const hist = await getHistorico(row.id);
-          histPane.innerHTML = viewHistorico(`Histórico — ${displayNUP(row.nup)}`, hist);
         } else {
           perguntaCriar((decisao) => {
             if (decisao) {
               setCreateMode(nupMasked);    // <<< limpa campos e habilita criação
             } else {
               resetForm(true);
-              histPane.innerHTML = viewHistorico("Histórico", []);
               $nup.focus();
             }
           });
@@ -1234,7 +1250,6 @@ export default {
     $buscar.addEventListener("click", buscar);
     $limpar.addEventListener("click", () => {
       resetForm(true);
-      histPane.innerHTML = viewHistorico("Histórico", []);
       renderGridPreservandoScroll();
       $msg.textContent = "NUP limpo.";
       $nup.focus();
@@ -1249,7 +1264,6 @@ export default {
           originalStatus = $status.value; originalTermino = $termino.value; $salvar.disabled = true;
           await refreshFirstPage();
           const hist = await getHistorico(currentRowId);
-          histPane.innerHTML = viewHistorico(`Histórico — ${currentNupMasked}`, hist);
         } else if (currentAction === "create") {
           if (!validarObrigatoriosParaCriar()) return;
           const payload = {
@@ -1264,7 +1278,6 @@ export default {
           setUpdateMode(novo); currentRowId = novo.id;
           await refreshFirstPage();
           const hist = await getHistorico(novo.id);
-          histPane.innerHTML = viewHistorico(`Histórico — ${displayNUP(novo.nup)}`, hist);
         } else {
           alert("Use o botão Buscar antes de salvar.");
         }
@@ -1277,7 +1290,7 @@ export default {
       try {
         await deleteProcesso(currentRowId);
         $msg.textContent = "Processo excluído com sucesso.";
-        resetForm(true); histPane.innerHTML = viewHistorico("Histórico", []);
+        resetForm(true);
         await refreshFirstPage(); $nup.focus();
       } catch (e) { alert("Erro ao excluir: " + e.message); }
     });
@@ -1310,7 +1323,6 @@ export default {
           row.comunicacoes_cientes = extractComunicacoesCientes(hist);
         }
         const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
-        histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
@@ -1349,7 +1361,6 @@ export default {
           row.comunicacoes_cientes = extractComunicacoesCientes(hist);
         }
         const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
-        histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
@@ -1390,7 +1401,6 @@ export default {
           row.comunicacoes_cientes = extractComunicacoesCientes(hist);
         }
         const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
-        histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
@@ -1430,7 +1440,6 @@ export default {
           row.comunicacoes_cientes = extractComunicacoesCientes(hist);
         }
         const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
-        histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
         renderGridPreservandoScroll();
         const totalPend = (row?.pareceres_pendentes?.length || 0) + (row?.pareceres_a_expedir?.length || 0);
@@ -1472,7 +1481,6 @@ export default {
         const hist = await getHistorico(currentRowId);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
         const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
-        histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
         renderGridPreservandoScroll();
         $msg.textContent = "Envio de notificação registrado.";
@@ -1505,7 +1513,6 @@ export default {
         const hist = await getHistorico(currentRowId);
         await fetchProfilesByEmails(hist.map(h => h.changed_by_email).filter(Boolean));
         const titulo = row ? `Histórico — ${displayNUP(row.nup)}` : "Histórico";
-        histPane.innerHTML = viewHistorico(titulo, hist);
         buildViewData();
         renderGridPreservandoScroll();
         $msg.textContent = "Ciência de notificação registrada.";
