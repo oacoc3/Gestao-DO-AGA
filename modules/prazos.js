@@ -180,6 +180,8 @@ function ensureLayoutCSS() {
     .prazos-mod { display:flex; height:100%; overflow:hidden; padding:8px; }
     #prazos-root { flex:1 1 auto; display:flex; gap:8px; overflow-x:auto; overflow-y:hidden; }
     #prazos-root .prazo-card { flex:1 1 0; min-width:0; display:flex; flex-direction:column; }
+    #prazos-root .prazo-stack { flex:1 1 0; min-width:0; display:flex; flex-direction:column; gap:8px; }
+    #prazos-root .prazo-stack .prazo-card { flex:1 1 0; }
     .prazo-card h2 {
       margin:0 0 8px 0;
       display:flex;
@@ -240,6 +242,15 @@ function tableTemplate(cat) {
           <tbody id="body-${cat.code}">${rows}</tbody>
         </table>
       </div>
+    </div>
+  `;
+}
+
+function stackTemplate(catA, catB) {
+  return `
+    <div class="prazo-stack">
+      ${tableTemplate(catA)}
+      ${tableTemplate(catB)}
     </div>
   `;
 }
@@ -325,32 +336,32 @@ export default {
       );
 
       cards.push(
-        tableTemplate({
-          code: "PARECERES_COMGAP",
-          title: "Pareceres COMGAP",
-          items: parecerCOMGAP,
-        })
+        stackTemplate(
+          {
+            code: "PARECERES_COMGAP",
+            title: "Pareceres COMGAP",
+            items: parecerCOMGAP,
+          },
+          {
+            code: "PARECERES_COMPREP",
+            title: "Pareceres COMPREP",
+            items: parecerCOMPREP,
+          }
+        )
       );
       cards.push(
-        tableTemplate({
-          code: "PARECERES_COMPREP",
-          title: "Pareceres COMPREP",
-          items: parecerCOMPREP,
-        })
-      );
-      cards.push(
-        tableTemplate({
-          code: "PARECERES_COMAE",
-          title: "Pareceres COMAE",
-          items: parecerCOMAE,
-        })
-      );
-      cards.push(
-        tableTemplate({
-          code: "RESPOSTA_GABAER",
-          title: "Resposta GABAER",
-          items: respostaGABAER,
-        })
+        stackTemplate(
+          {
+            code: "PARECERES_COMAE",
+            title: "Pareceres COMAE",
+            items: parecerCOMAE,
+          },
+          {
+            code: "RESPOSTA_GABAER",
+            title: "Resposta GABAER",
+            items: respostaGABAER,
+          }
+        )
       );
 
       cards.push(
