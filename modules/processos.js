@@ -144,12 +144,22 @@ async function updateStatus(id, newStatus, terminoObra) {
   await ensureSession();
   const payload = { status: newStatus };
   if (terminoObra !== undefined) payload.termino_obra = terminoObra || null;
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("processos")
     .update(payload)
     .eq("id", id)
     .select()
     .single();
+  // Patch: se o backend ainda não tiver a coluna termino_obra, tenta novamente sem ela
+  if (error && /termino_obra/i.test(error.message)) {
+    delete payload.termino_obra;
+    ({ data, error } = await supabase
+      .from("processos")
+      .update(payload)
+      .eq("id", id)
+      .select()
+      .single());
+  }
   if (error) throw error;
   return data;
 }
@@ -1430,6 +1440,17 @@ export default {
         await ensureSession();
         const { error } = await supabase.rpc("receive_parecer", { p_processo_id: currentRowId, p_orgao: escolha });
         if (error) throw error;
+        // Patch: remover tarefa de prazo relacionada ao parecer recebido (se existir)
+        const taskCode = `PARECER_${escolha}`
+          .normalize("NFD")
+          .replace(/[^\w]/g, "_")
+          .toUpperCase();
+        await supabase
+          .from("process_tasks")
+          .delete()
+          .eq("processo_id", currentRowId)
+          .eq("code", taskCode);
+
         if (row) {
           row.pareceres_pendentes = (row.pareceres_pendentes || []).filter(p => p !== escolha);
         }
@@ -1446,7 +1467,7 @@ export default {
         $parecer.disabled = totalPend >= PARECER_OPCOES.length;
         const usedSig = new Set([...(row?.pareceres_a_expedir || []), ...(row?.pareceres_pendentes || []), ...(row?.pareceres_recebidos || [])]);
         $expedir.disabled = SIGADAER_OPCOES.every(p => usedSig.has(p));
-        $receber_DISABLED = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
+        $receber.disabled = !(row?.pareceres_a_expedir && row.pareceres_a_expedir.length);
         $msg.textContent = "Recebimento registrado.";
       } catch (e) {
         $msg.textContent = "Erro ao registrar recebimento: " + e.message;
@@ -1527,6 +1548,12 @@ export default {
     });
 
     // Inicialização
+    const nupFromStorage = sessionStorage.getItem('processoNup');
     await fetchFirstPage();
+    if (nupFromStorage) {
+      sessionStorage.removeItem('processoNup');
+      $nup.value = displayNUP(nupFromStorage);
+      await buscar();
+    }
   },
 };
