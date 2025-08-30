@@ -13,6 +13,18 @@ const TITLES = {
 const SOBRESTADOS = new Set(["Sobrestado"]);
 const DIA_MS = 24 * 60 * 60 * 1000;
 
+function sortByDue(items = []) {
+  return items
+    .slice()
+    .sort((a, b) => {
+      const da = Date.parse(a.due_at);
+      const db = Date.parse(b.due_at);
+      if (isNaN(da)) return 1;
+      if (isNaN(db)) return -1;
+      return da - db;
+    });
+}
+
 function calcularPrazoRegional(p, hist = []) {
   if (SOBRESTADOS.has(p.status)) return "Sobrestado";
   let base = p.entrada_regional ? new Date(p.entrada_regional) : null;
@@ -54,10 +66,12 @@ async function fetchPrazoRegional() {
     histMap.set(h.processo_id, arr);
   });
 
-  return processos.map((p) => {
-    const prazo = calcularPrazoRegional(p, histMap.get(p.id) || []);
-    return { processos: { nup: p.nup }, due_at: prazo };
-  });
+  return sortByDue(
+    processos.map((p) => {
+      const prazo = calcularPrazoRegional(p, histMap.get(p.id) || []);
+      return { processos: { nup: p.nup }, due_at: prazo };
+    })
+  );
 }
 
 async function fetchPareceres(tipo, prazoDias) {
@@ -86,17 +100,19 @@ async function fetchPareceres(tipo, prazoDias) {
     if (!histMap.has(h.processo_id)) histMap.set(h.processo_id, h.changed_at);
   });
 
-  return processos.map((p) => {
-    const base = histMap.get(p.id);
-    const prazo = base
-      ? new Date(
-          new Date(base).setHours(0, 0, 0, 0) + (prazoDias + 1) * DIA_MS
-        )
-          .toISOString()
-          .slice(0, 10)
-      : "";
-    return { processos: { nup: p.nup }, due_at: prazo };
-  });
+  return sortByDue(
+    processos.map((p) => {
+      const base = histMap.get(p.id);
+      const prazo = base
+        ? new Date(
+            new Date(base).setHours(0, 0, 0, 0) + (prazoDias + 1) * DIA_MS
+          )
+            .toISOString()
+            .slice(0, 10)
+        : "";
+      return { processos: { nup: p.nup }, due_at: prazo };
+    })
+  );
 }
 
 async function fetchComunicacoes(tipo, prazoDias) {
@@ -127,17 +143,19 @@ async function fetchComunicacoes(tipo, prazoDias) {
     if (!histMap.has(h.processo_id)) histMap.set(h.processo_id, h.changed_at);
   });
 
-  return processos.map((p) => {
-    const base = histMap.get(p.id);
-    const prazo = base
-      ? new Date(
-          new Date(base).setHours(0, 0, 0, 0) + prazoDias * DIA_MS
-        )
-          .toISOString()
-          .slice(0, 10)
-      : "";
-    return { processos: { nup: p.nup }, due_at: prazo };
-  });
+  return sortByDue(
+    processos.map((p) => {
+      const base = histMap.get(p.id);
+      const prazo = base
+        ? new Date(
+            new Date(base).setHours(0, 0, 0, 0) + prazoDias * DIA_MS
+          )
+            .toISOString()
+            .slice(0, 10)
+        : "";
+      return { processos: { nup: p.nup }, due_at: prazo };
+    })
+  );
 }
 
 async function fetchTerminoObra() {
@@ -160,10 +178,12 @@ async function fetchTerminoObra() {
     error = null;
   }
   if (error) throw error;
-  return (data || []).map((p) => ({
-    processos: { nup: p.nup },
-    due_at: p.termino_obra || p.termino || "",
-  }));
+  return sortByDue(
+    (data || []).map((p) => ({
+      processos: { nup: p.nup },
+      due_at: p.termino_obra || p.termino || "",
+    }))
+  );
 }
 
 async function fetchRemocaoRebaix() {
@@ -180,11 +200,13 @@ async function fetchRemocaoRebaix() {
     if (!latest.has(r.processo_id)) latest.set(r.processo_id, r);
   });
 
-  return Array.from(latest.values()).map((r) => {
-    const base = new Date(r.changed_at).setHours(0, 0, 0, 0);
-    const prazo = new Date(base + 121 * DIA_MS).toISOString().slice(0, 10);
-    return { processos: { nup: r.processos?.nup }, due_at: prazo };
-  });
+  return sortByDue(
+    Array.from(latest.values()).map((r) => {
+      const base = new Date(r.changed_at).setHours(0, 0, 0, 0);
+      const prazo = new Date(base + 121 * DIA_MS).toISOString().slice(0, 10);
+      return { processos: { nup: r.processos?.nup }, due_at: prazo };
+    })
+  );
 }
 
 async function fetchSobrestamento() {
@@ -196,7 +218,7 @@ async function fetchSobrestamento() {
     .is("started_at", null)
     .order("due_at", { ascending: true });
   if (error) throw error;
-  return data || [];
+  return sortByDue(data || []);
 }
 
 function ensureLayoutCSS() {
@@ -266,15 +288,7 @@ function formatTitle(title) {
 
 function tableTemplate(cat) {
   const rows =
-    (cat.items || [])
-      .slice()
-      .sort((a, b) => {
-        const da = Date.parse(a.due_at);
-        const db = Date.parse(b.due_at);
-        if (isNaN(da)) return 1;
-        if (isNaN(db)) return -1;
-        return da - db;
-      })
+    sortByDue(cat.items || [])
       .map((r) => {
         const nup = r.processos?.nup || "";
         const prazo = r.due_at
@@ -282,7 +296,7 @@ function tableTemplate(cat) {
             ? r.due_at
             : new Date(r.due_at).toLocaleDateString()
           : "";
-        return `<tr><td><div>${nup}</div><div>${prazo}</div></td></tr>`;
+        return `<tr data-nup="${nup}"><td><div>${nup}</div><div>${prazo}</div></td></tr>`;
       })
       .join("") || `<tr><td>Nenhum registro.</td></tr>`;
   const title = formatTitle(cat.title);
@@ -468,6 +482,18 @@ export default {
       );
 
       root.innerHTML = cards.join("");
+
+      root.querySelectorAll('tr[data-nup]').forEach(tr => {
+        tr.style.cursor = 'pointer';
+        tr.addEventListener('click', () => {
+          const nup = tr.getAttribute('data-nup');
+          if (nup) {
+            sessionStorage.setItem('processoNup', nup.replace(/\D/g, ''));
+            window.location.href = '#/processos';
+            window.location.reload();
+          }
+        });
+      });
     } catch (e) {
       root.innerHTML = `<p>Erro: ${e.message}</p>`;
     }
